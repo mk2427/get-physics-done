@@ -24,7 +24,7 @@ import gpd.runtime_cli as runtime_cli
 from gpd.adapters import get_adapter, list_runtimes
 from gpd.cli import app
 from gpd.core import cli_args as cli_args_module
-from gpd.core.constants import ProjectLayout, STATE_JSON_BACKUP_FILENAME
+from gpd.core.constants import STATE_JSON_BACKUP_FILENAME, ProjectLayout
 from gpd.core.costs import (
     CostBudgetThresholdSummary,
     CostProjectSummary,
@@ -42,6 +42,18 @@ from gpd.core.health import (
     UnattendedReadinessResult,
 )
 from gpd.core.project_reentry import resolve_project_reentry
+from gpd.core.public_surface_contract import (
+    local_cli_bridge_commands,
+    local_cli_doctor_local_command,
+    local_cli_install_local_example_command,
+    local_cli_permissions_status_command,
+    local_cli_permissions_sync_command,
+    local_cli_plan_preflight_command,
+    local_cli_resume_command,
+    local_cli_resume_recent_command,
+    local_cli_unattended_readiness_command,
+    local_cli_validate_command_context_command,
+)
 from gpd.core.resume_surface import RESUME_COMPATIBILITY_ALIAS_FIELDS
 from gpd.core.state import default_state_dict, generate_state_markdown, save_state_json, save_state_markdown
 from tests.latex_test_support import toolchain_capability as _toolchain_capability
@@ -189,7 +201,7 @@ def test_entrypoint_reexecs_from_checkout_when_running_outside_checkout(tmp_path
     assert env["PYTHONPATH"].split(os.pathsep)[0] == str(checkout / "src")
 
 
-def test_help():
+def test_help_surfaces_core_and_auxiliary_commands() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     assert "observe" in result.output
@@ -197,11 +209,6 @@ def test_help():
     assert "phase" in result.output
     assert "health" in result.output
     assert "paper-build" in result.output
-
-
-def test_help_surfaces_local_setup_and_preflight_commands() -> None:
-    result = runner.invoke(app, ["--help"])
-    assert result.exit_code == 0
     assert "doctor" in result.output
     assert "Check GPD installation and environment health" in result.output
     assert "inspect runtime readiness" in result.output
@@ -213,47 +220,36 @@ def test_help_surfaces_local_setup_and_preflight_commands() -> None:
     assert "validate" in result.output
     assert "readiness" in result.output
     assert "observability" in result.output
-
-
-def test_help_surfaces_permissions_readiness_commands() -> None:
-    result = runner.invoke(app, ["--help"])
-    assert result.exit_code == 0
     normalized_output = _normalize_cli_output(result.output)
     assert "permissions" in normalized_output
     assert "Runtime permission readiness and sync" in normalized_output
     assert "gpd doctor" in normalized_output
-    assert "gpd validate unattended-readiness --runtime <runtime> --autonomy balanced" in normalized_output
-    assert "gpd permissions status --runtime <runtime> --autonomy balanced" in normalized_output
+    assert local_cli_unattended_readiness_command() in normalized_output
+    assert local_cli_permissions_status_command() in normalized_output
+    assert local_cli_permissions_sync_command() in normalized_output
     assert "gpd observe execution" in normalized_output
-    assert "gpd resume --recent" in normalized_output
 
+    assert local_cli_resume_recent_command() in normalized_output
+    assert local_cli_install_local_example_command() in normalized_output
+    assert local_cli_doctor_local_command() in normalized_output
+    assert local_cli_validate_command_context_command() in normalized_output
 
-def test_help_surfaces_authoritative_local_cli_bridge_inventory() -> None:
-    from gpd.core.public_surface_contract import local_cli_bridge_commands
-
-    result = runner.invoke(app, ["--help"])
-
-    assert result.exit_code == 0
-    normalized_output = _normalize_cli_output(result.output)
     for command in local_cli_bridge_commands():
         assert command in normalized_output
-
-
-def test_help_surfaces_workflow_presets_surface() -> None:
-    result = runner.invoke(app, ["--help"])
-    assert result.exit_code == 0
-    normalized_output = " ".join(result.output.split())
     assert "presets" in normalized_output
     assert "Workflow presets for local CLI preview" in normalized_output
     assert "application" in normalized_output
-
-
-def test_help_surfaces_integrations_surface() -> None:
-    result = runner.invoke(app, ["--help"])
-    assert result.exit_code == 0
-    normalized_output = " ".join(result.output.split())
     assert "integrations" in normalized_output
     assert "Optional shared capability integrations" in normalized_output
+
+
+def test_install_help_uses_public_surface_examples() -> None:
+    result = runner.invoke(app, ["install", "--help"])
+
+    assert result.exit_code == 0
+    normalized_output = _normalize_cli_output(result.output)
+    assert local_cli_install_local_example_command() in normalized_output
+    assert "gpd install <runtime> # single runtime, local" not in normalized_output
 
 
 def test_workflow_presets_help_surfaces_apply_command() -> None:
@@ -273,7 +269,11 @@ def test_workflow_presets_surface_lists_catalog() -> None:
 
 
 def test_integrations_status_reports_effective_project_local_state_and_plan_readiness(tmp_path: Path) -> None:
-    result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "integrations", "status", "wolfram"])
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "GPD").mkdir()
+
+    result = runner.invoke(app, ["--cwd", str(project_root), "--raw", "integrations", "status", "wolfram"])
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["integration"] == "wolfram"
@@ -282,34 +282,48 @@ def test_integrations_status_reports_effective_project_local_state_and_plan_read
     assert payload["ready"] is False
     assert payload["state"] == "missing-api-key"
     assert payload["scope"] == "project-local"
-    assert payload["plan_readiness_command"] == "gpd validate plan-preflight <PLAN.md>"
+    assert payload["plan_readiness_command"] == local_cli_plan_preflight_command()
     assert payload["api_key_env"] == "GPD_WOLFRAM_MCP_API_KEY"
     assert "GPD_WOLFRAM_MCP_API_KEY" in payload["next_step"]
     assert "Mathematica" in payload["local_mathematica_note"]
 
 
 def test_integrations_enable_and_disable_wolfram_persist_project_local_config(tmp_path: Path) -> None:
-    enable_result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "integrations", "enable", "wolfram"])
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "GPD").mkdir()
+
+    enable_result = runner.invoke(app, ["--cwd", str(project_root), "--raw", "integrations", "enable", "wolfram"])
     assert enable_result.exit_code == 0
     enable_payload = json.loads(enable_result.output)
     assert enable_payload["enabled"] is True
     assert enable_payload["scope"] == "project-local"
 
-    config_path = tmp_path / "GPD" / "integrations.json"
+    config_path = project_root / "GPD" / "integrations.json"
     assert config_path.exists()
     saved = json.loads(config_path.read_text(encoding="utf-8"))
     assert saved["wolfram"]["enabled"] is True
 
-    disable_result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "integrations", "disable", "wolfram"])
+    disable_result = runner.invoke(app, ["--cwd", str(project_root), "--raw", "integrations", "disable", "wolfram"])
     assert disable_result.exit_code == 0
     disable_payload = json.loads(disable_result.output)
     assert disable_payload["enabled"] is False
 
-    status_result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "integrations", "status", "wolfram"])
+    status_result = runner.invoke(app, ["--cwd", str(project_root), "--raw", "integrations", "status", "wolfram"])
     assert status_result.exit_code == 0
     status_payload = json.loads(status_result.output)
     assert status_payload["enabled"] is False
     assert status_payload["state"] == "disabled"
+
+
+@pytest.mark.parametrize("command", ("status", "enable", "disable"))
+def test_integrations_commands_fail_outside_real_project(tmp_path: Path, command: str) -> None:
+    result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "integrations", command, "wolfram"])
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert "real GPD project root" in payload["error"]
+    assert not (tmp_path / "GPD").exists()
 
 
 def test_integrations_commands_use_project_root_config_from_nested_workspace(tmp_path: Path) -> None:
@@ -1101,7 +1115,7 @@ def test_resume_recovery_advice_uses_resolved_runtime_commands(monkeypatch: pyte
     assert advice.continue_command == "/gpd:resume-work"
     assert advice.fast_next_command == "/gpd:suggest-next"
     assert advice.mode == "current-workspace"
-    assert advice.primary_command == "gpd resume"
+    assert advice.primary_command == local_cli_resume_command()
 
 
 def test_resume_recovery_advice_keeps_recent_projects_fallbacks_distinct(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1116,7 +1130,7 @@ def test_resume_recovery_advice_keeps_recent_projects_fallbacks_distinct(monkeyp
     assert advice.continue_command == "runtime `resume-work`"
     assert advice.fast_next_command == "runtime `suggest-next`"
     assert advice.mode == "recent-projects"
-    assert advice.primary_command == "gpd resume --recent"
+    assert advice.primary_command == local_cli_resume_recent_command()
 
 
 def test_resume_runtime_commands_logs_runtime_resolution_failures(
@@ -1223,7 +1237,7 @@ def test_resume_recent_human_output_surfaces_command_and_missing_projects(
     assert "Next here" in result.output
     assert "Resume:" in result.output
     assert "gpd --cwd" in result.output
-    assert "continue in the selected workspace" in normalized
+    assert "continue there with `resume-work`" in result.output
     assert "resume-work" in result.output
     assert "suggest-next" in result.output
     assert "Why shown: shown because it still has a usable handoff target" in result.output
@@ -1297,7 +1311,7 @@ def test_resume_plain_output_hints_recent_when_workspace_is_missing(tmp_path: Pa
 
     assert result.exit_code == 0
     assert "No GPD planning directory" in result.output
-    assert "gpd resume --recent" in result.output
+    assert local_cli_resume_recent_command() in result.output
 
 
 def test_resume_plain_output_surfaces_auto_selected_recent_project(tmp_path: Path, monkeypatch) -> None:
@@ -5060,7 +5074,7 @@ def test_observe_execution_human_output_keeps_waiting_state_distinct_from_possib
     assert result.exit_code == 0
     assert "Execution Status" in result.output
     assert "Check next" in result.output
-    assert "gpd resume" in result.output
+    assert local_cli_resume_command() in result.output
     assert "waiting" in result.output.lower()
     assert "possibly stalled" not in result.output.lower()
 
@@ -5117,7 +5131,7 @@ def test_observe_execution_raw_surfaces_tangent_proposal_without_replacing_prima
     assert payload["tangent_decision"] == "branch_later"
     assert payload["tangent_decision_label"] == "branch later"
     assert payload["tangent_pending"] is False
-    assert payload["next_check_command"] == "gpd resume"
+    assert payload["next_check_command"] == local_cli_resume_command()
     assert payload["tangent_follow_up"] == [
         "Use the runtime `tangent` command to keep the chooser explicit for this alternative path.",
         "Use the runtime `branch-hypothesis` command only if you decide to open a git-backed alternative path after this bounded stop.",
@@ -5152,7 +5166,7 @@ def test_observe_execution_human_output_surfaces_branch_later_tangent_follow_up(
     assert "Tangent follow-up" in result.output
     assert "runtime `tangent` command" in result.output
     assert "runtime `branch-hypothesis` command" in result.output
-    assert "gpd resume" in result.output
+    assert local_cli_resume_command() in result.output
     assert "possibly stalled" not in result.output.lower()
 
 
@@ -6796,3 +6810,98 @@ def test_regression_check_subcommand_failing(mock_check):
     mock_check.return_value = mock_result
     result = runner.invoke(app, ["regression-check"])
     assert result.exit_code == 1
+
+
+def test_digest_knowledge_adversarial_flag() -> None:
+    """`/gpd:digest-knowledge` surfaces the --adversarial opt-in flag and dispatches
+    to the adversarial-path step sequence per brief 002 §4.1 step 2 + commit 5 spec.
+
+    The command is markdown-defined (no CLI subcommand), so the test reads the
+    canonical command + workflow markdown and verifies:
+
+    1. `--adversarial` appears in the argument-hint for user discoverability.
+    2. The command body documents the flag with the per-paper charter per brief
+       §5 table.
+    3. The command body names both the digester and the critic agents that the
+       adversarial-path dispatches to.
+    4. The workflow file carries the four-step adversarial-path stanza
+       (a)-(d) per commit 5 spec.
+    5. The light path survives unchanged when the flag is absent (opt-in).
+    """
+
+    from gpd.registry import get_command
+
+    command = get_command("gpd:digest-knowledge")
+
+    # 1. Flag appears in argument-hint for user discoverability via runtime help.
+    assert "--adversarial" in command.argument_hint, (
+        f"--adversarial flag missing from digest-knowledge argument-hint: {command.argument_hint!r}"
+    )
+
+    # 2. Command body documents the flag with the per-paper charter.
+    body = command.content
+    assert "--adversarial" in body, "--adversarial flag missing from command body"
+    assert "opt-in" in body.lower(), "flag should be documented as opt-in"
+    assert "find equation errors" in body, (
+        "per-paper charter from brief §5 table missing from command body"
+    )
+
+    # 3. Command body names both agents the adversarial path dispatches to.
+    assert "gpd-paper-digester" in body, "gpd-paper-digester not wired in command body"
+    assert "gpd-knowledge-critic" in body, "gpd-knowledge-critic not wired in command body"
+
+    # 4. Workflow carries the four-step adversarial-path stanza.
+    workflow_path = (
+        Path(__file__).resolve().parents[2]
+        / "src"
+        / "gpd"
+        / "specs"
+        / "workflows"
+        / "digest-knowledge.md"
+    )
+    workflow = workflow_path.read_text(encoding="utf-8")
+    assert "adversarial_path" in workflow, "adversarial-path stanza missing from workflow"
+    for step_tag in (
+        "adversarial_step_a",
+        "adversarial_step_b",
+        "adversarial_step_c",
+        "adversarial_step_d",
+    ):
+        assert step_tag in workflow, f"workflow missing adversarial-path step {step_tag}"
+    assert "artifact_kind:    physics" in workflow or "artifact_kind: physics" in workflow, (
+        "workflow must route the loop with artifact_kind=physics (no iteration cap per L20)"
+    )
+    assert "gpd-knowledge-critic" in workflow, "workflow must name the critic agent"
+    assert "gpd-paper-digester" in workflow, "workflow must name the digester agent"
+
+    # 5. Light path survives: the light-path steps (write_draft, handle_review)
+    # remain in the workflow so `--adversarial`-absent invocations run unchanged.
+    assert "<step name=\"write_draft\">" in workflow, "light-path write_draft step missing"
+    assert "<step name=\"handle_review\">" in workflow, "light-path handle_review step missing"
+
+
+def test_digest_knowledge_adversarial_agents_registered() -> None:
+    """Both adversarial-path agents are canonically registered per commit 5 spec.
+
+    The agents must resolve through the skill registry + land in categories
+    that keep `_SKILL_CATEGORY_MAP` coherent (brief 002 §5 + commit 5 spec
+    registry-categorization decision).
+    """
+
+    from gpd.registry import get_skill
+
+    digester = get_skill("gpd-paper-digester")
+    assert digester.category == "research", (
+        "gpd-paper-digester should be categorized 'research' (producer side, "
+        "same family as gpd-digest-knowledge)"
+    )
+    assert digester.source_kind == "agent"
+    assert "paper-digester" in digester.path
+
+    critic = get_skill("gpd-knowledge-critic")
+    assert critic.category == "review", (
+        "gpd-knowledge-critic should be categorized 'review' (critic side, "
+        "same family as gpd-adversarial-review + gpd-finding-adjudicator)"
+    )
+    assert critic.source_kind == "agent"
+    assert "knowledge-critic" in critic.path

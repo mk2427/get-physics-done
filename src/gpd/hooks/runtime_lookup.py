@@ -28,7 +28,7 @@ def _project_dir_is_trusted(explicit_project_dir: bool, project_dir_trusted: boo
     return project_dir_trusted if project_dir_trusted is not None else explicit_project_dir
 
 
-def _normalized_runtime_hint(runtime: str | None) -> str | None:
+def normalize_runtime_hint(runtime: str | None) -> str | None:
     if runtime is None:
         return None
     normalized = normalize_runtime_name(runtime) or runtime.strip() or None
@@ -52,12 +52,12 @@ def resolve_runtime_lookup_active_runtime(
 ) -> str | None:
     """Resolve the active runtime without letting nested installs hijack explicit project roots."""
     if _project_dir_is_trusted(explicit_project_dir, project_dir_trusted):
-        project_runtime = _normalized_runtime_hint(runtime_resolver(project_root))
+        project_runtime = normalize_runtime_hint(runtime_resolver(project_root))
         if project_runtime or workspace_dir == project_root:
             return project_runtime
-        return _normalized_runtime_hint(runtime_resolver(workspace_dir))
+        return normalize_runtime_hint(runtime_resolver(workspace_dir))
 
-    return _normalized_runtime_hint(runtime_resolver(workspace_dir))
+    return normalize_runtime_hint(runtime_resolver(workspace_dir))
 
 
 def resolve_runtime_lookup_dir(
@@ -69,30 +69,22 @@ def resolve_runtime_lookup_dir(
     active_runtime: str | None = None,
 ) -> str:
     """Return the cwd hook surfaces should use for runtime-owned lookups."""
-    normalized_runtime = _normalized_runtime_hint(active_runtime)
+    normalized_runtime = normalize_runtime_hint(active_runtime)
     if _project_dir_is_trusted(explicit_project_dir, project_dir_trusted):
         resolved_workspace = Path(workspace_dir).expanduser().resolve(strict=False)
         resolved_project = Path(project_root).expanduser().resolve(strict=False)
-        runtime_names = supported_runtime_names()
         if normalized_runtime is None:
-            for runtime in runtime_names:
+            for runtime in supported_runtime_names():
                 install_target = detect_runtime_install_target(runtime, cwd=resolved_workspace)
                 if install_target is not None and install_target.install_scope == SCOPE_LOCAL:
                     return _normalized_lookup_dir(resolved_workspace)
             return _normalized_lookup_dir(resolved_project)
-        if normalized_runtime is not None:
-            install_target = detect_runtime_install_target(normalized_runtime, cwd=resolved_workspace)
-            if install_target is not None and install_target.install_scope == SCOPE_LOCAL:
-                return _normalized_lookup_dir(resolved_workspace)
-            project_target = detect_runtime_install_target(normalized_runtime, cwd=resolved_project)
-            if project_target is not None and project_target.install_scope == SCOPE_LOCAL:
-                return _normalized_lookup_dir(resolved_project)
-            for runtime in runtime_names:
-                if runtime == normalized_runtime:
-                    continue
-                install_target = detect_runtime_install_target(runtime, cwd=resolved_workspace)
-                if install_target is not None and install_target.install_scope == SCOPE_LOCAL:
-                    return _normalized_lookup_dir(resolved_workspace)
+        install_target = detect_runtime_install_target(normalized_runtime, cwd=resolved_workspace)
+        if install_target is not None and install_target.install_scope == SCOPE_LOCAL:
+            return _normalized_lookup_dir(resolved_workspace)
+        project_target = detect_runtime_install_target(normalized_runtime, cwd=resolved_project)
+        if project_target is not None and project_target.install_scope == SCOPE_LOCAL:
+            return _normalized_lookup_dir(resolved_project)
         return _normalized_lookup_dir(resolved_project)
 
     return _normalized_lookup_dir(workspace_dir)

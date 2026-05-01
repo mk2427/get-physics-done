@@ -24,7 +24,6 @@ from gpd.adapters.runtime_catalog import (
 from gpd.adapters.tool_names import CONTEXTUAL_TOOL_REFERENCE_NAMES
 from gpd.core.constants import HOME_DATA_DIR_NAME
 from gpd.core.public_surface_contract import local_cli_bridge_commands
-from gpd.registry import render_command_visibility_sections_from_frontmatter
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -397,19 +396,6 @@ def _materialize_workflow_paths(
     return content
 
 
-def materialize_first_round_review_schema_headings(content: str) -> str:
-    """Render staged-review prompt content with concrete first-round filenames.
-
-    Source prompts stay round-aware via ``{round_suffix}`` / ``{-RN}``, but
-    installed agent prompts should show the concrete first-round artifact names
-    models read before producing those files. Keep the source markdown generic;
-    materialize only at install time.
-    """
-    content = content.replace("{round_suffix}", "")
-    content = content.replace("{-RN}", "")
-    return content
-
-
 _BRACED_PROMPT_VAR_RE = re.compile(r"(?<!\\)\$\{([A-Za-z_][A-Za-z0-9_]*)(?:[^{}]*)\}")
 _PLAIN_SHELL_VAR_RE = re.compile(r"(?<!\\)\$([A-Za-z_][A-Za-z0-9_]*)(?=[^A-Za-z0-9_-]|$)")
 _INLINE_MATH_RE = re.compile(r"(?<!\\)\$(?=\S)([^$\n]*?\S)(?<!\\)\$(?![A-Za-z0-9_])")
@@ -549,6 +535,8 @@ def _strip_top_level_markdown_section(body: str, *, heading: str) -> str:
 
 def _inject_command_visibility_sections_from_frontmatter(content: str) -> str:
     """Front-load model-visible command constraints into installed markdown once."""
+
+    from gpd.registry import render_command_visibility_sections_from_frontmatter
 
     preamble, frontmatter, separator, body = split_markdown_frontmatter(content)
     if not frontmatter:
@@ -1353,7 +1341,6 @@ def _copy_dir_contents(
                     install_scope=install_scope,
                     explicit_target=explicit_target,
                 )
-            content = materialize_first_round_review_schema_headings(content)
             content = _inject_command_visibility_sections_from_frontmatter(content)
             dest.write_text(content, encoding="utf-8")
         else:

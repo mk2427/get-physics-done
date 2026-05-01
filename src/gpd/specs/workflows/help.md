@@ -27,7 +27,7 @@ Getting started:
 Returning to work:
   gpd resume             — Current-workspace read-only recovery snapshot from your normal terminal
   gpd resume --recent    — Find the workspace first when you need to reopen a different one
-  gpd:resume-work         — Continue in-runtime from the selected project state
+  gpd:resume-work         — Continue in-runtime from the selected project's canonical state
   gpd:progress            — Review the broader project snapshot
   gpd:suggest-next        — Fastest post-resume next command when you only need the next action
   gpd observe execution    — Read-only live status from your normal terminal; use this for progress / waiting state, then follow its suggested read-only checks rather than runtime hotkeys
@@ -125,7 +125,7 @@ For the exact beginner-first startup order, use the shared onboarding surfaces i
 2. `gpd:start` - Let GPD choose the safest first step for the current folder.
 3. `gpd:tour` - Get a read-only walkthrough before you choose.
 4. `gpd:new-project` or `gpd:map-research` - Begin the actual work path once you know the folder state.
-5. `gpd:resume-work` - Continue later after you have an existing GPD project.
+5. `gpd:resume-work` - Continue later from the selected project's canonical state.
 6. `gpd:settings` - Change autonomy, permissions, or runtime preferences after your first successful start or later.
 7. `gpd:set-tier-models` - Directly pin concrete `tier-1`, `tier-2`, and `tier-3` model ids for the active runtime.
 
@@ -138,12 +138,13 @@ Depending on the runtime, those names may be rendered with slash prefixes, dolla
 - That shared onboarding surface keeps the OS guides, runtime guides, and beginner startup checklist in one place.
 - Use these names inside the installed agent/runtime command surface.
 - The bootstrap installer owns Node.js / Python / `venv` prerequisites. The local `gpd` CLI may expose different `gpd ...` subcommands and grouping. Use `gpd --help` to inspect the executable local install/readiness/permissions/diagnostics surface directly.
+- Use `gpd permissions status --runtime <runtime> --autonomy balanced` when you want the read-only runtime-owned permission/alignment snapshot from your normal terminal.
 - Use `gpd validate unattended-readiness --runtime <runtime> --autonomy balanced` for the unattended or overnight verdict, and `gpd permissions sync --runtime <runtime> --autonomy balanced` when runtime-owned permissions need realignment.
-- `gpd doctor` checks the selected install target and runtime-local readiness signals. `gpd validate unattended-readiness ...` returns `ready`, `relaunch-required`, `not-ready`, or `unresolved`. Add `--live-executable-probes` if you also want cheap local executable probes such as `pdflatex --version` or `wolframscript -version`. `gpd permissions ...` checks runtime-owned approval/alignment only.
+- `gpd doctor` checks the selected install target and runtime-local readiness signals. `gpd validate unattended-readiness --runtime <runtime> --autonomy balanced` returns `ready`, `relaunch-required`, `not-ready`, or `unresolved`. Add `--live-executable-probes` if you also want cheap local executable probes such as `pdflatex --version` or `wolframscript -version`. `gpd permissions status --runtime <runtime> --autonomy balanced` is the read-only runtime-owned approval/alignment snapshot, and `gpd permissions sync --runtime <runtime> --autonomy balanced` is the write path when runtime-owned alignment needs to be changed.
 - If you need to validate whether a public runtime command can run in the current workspace, use `gpd validate command-context gpd:<name>`.
 - If a plan declares specialized `tool_requirements`, use `gpd validate plan-preflight <PLAN.md>` from your normal terminal before execution.
 - For a normal-terminal, current-workspace read-only recovery snapshot without launching the runtime, use `gpd resume`.
-- For cross-project discovery from your normal terminal, use `gpd resume --recent` first, then open the selected project and continue there with the runtime `resume-work` command.
+- For cross-project discovery from your normal terminal, use `gpd resume --recent` to find the workspace first, then open the selected project and continue there with the runtime `resume-work` command.
 - After resuming inside the runtime, use `gpd:suggest-next` when you only need the next action.
 - For a normal-terminal, read-only machine-local usage / cost summary, use `gpd cost`.
 
@@ -167,7 +168,7 @@ Use the path that matches your current situation:
 **Returning work**
 1. `gpd resume` - Reopen the current-workspace recovery snapshot from your normal terminal
 2. `gpd resume --recent` - Find a different workspace first from your normal terminal
-3. `gpd:resume-work` - Continue inside the reopened project
+3. `gpd:resume-work` - Continue inside the reopened project's canonical state
 4. `gpd:progress` - See the broader project snapshot
 5. `gpd:suggest-next` - Get the fastest next action
 6. `gpd observe execution` - Watch progress / waiting state, conservative `possibly stalled` wording, and the next read-only checks from your normal terminal
@@ -191,7 +192,7 @@ This is the compact grouped list of runtime commands. For normal-terminal instal
 - `gpd:new-project` - Create a full GPD project
 - `gpd:new-project --minimal` - Create a GPD project through the shortest setup path
 - `gpd:map-research` - Map an existing research folder before planning
-- `gpd:resume-work` - Resume an existing GPD project inside the runtime
+- `gpd:resume-work` - Resume the selected project's canonical state inside the runtime
 - `gpd:progress` - Review project status and likely next steps
 - `gpd:suggest-next` - Ask only for the next best action
 - `gpd:explain [concept]` - Explain a concept, method, result, or paper
@@ -218,6 +219,10 @@ This is the compact grouped list of runtime commands. For normal-terminal instal
 - `gpd:new-milestone <name>` - Start the next milestone
 - `gpd:complete-milestone <version>` - Archive a completed milestone
 
+### Knowledge and assertions
+
+- `gpd:digest-assertion <E-entry-ids | K-labels> [--adversarial]` - Create or review an assertion doc from EQN-REF entries or knowledge-doc K-labels
+
 ### Validation and analysis
 
 - `gpd:verify-work [phase]` - Run physics verification checks
@@ -227,6 +232,7 @@ This is the compact grouped list of runtime commands. For normal-terminal instal
 - `gpd:numerical-convergence` - Run convergence checks for numerical work
 - `gpd:compare-experiment` - Compare results against external data
 - `gpd:compare-results` - Compare internal results or baselines
+- `gpd:compute-sympy "<problem>"` - Solve or verify a math/physics problem with SymPy (symbolic + numerical fallback) via `gpd-sympy-calculator`
 - `gpd:validate-conventions [phase]` - Check notation and convention consistency
 - `gpd:regression-check [phase]` - Scan for regressions in recorded verification state
 - `gpd:health` - Run project health checks
@@ -303,9 +309,9 @@ Show a guided beginner tour of the core GPD commands without taking action.
 Usage: `gpd:tour`
 
 **`gpd:new-project`**
-Initialize new research project through unified flow.
+Initialize a new research project through questioning, optional survey, scoping, and roadmap generation.
 
-One command takes you from research idea to ready-for-investigation:
+One command takes you from idea to ready-for-investigation:
 
 - Deep questioning to understand the physics problem
 - Optional literature survey (spawns 4 parallel scout agents)
@@ -558,17 +564,12 @@ Usage: `gpd:progress --reconcile` (fix diverged STATE.md and state.json)
 ### Session Management
 
 **`gpd:resume-work`**
-Resume research from previous session with full context restoration.
+Resume research from a previous session with full context restoration.
 
-- `state.json.continuation` is the durable authority for resume state; the shared resume resolver projects the public recovery view from it first
-- Restores canonical continuation state, recent progress, and recorded handoff context through the shared resume resolver
-  - Public resume vocabulary centers on canonical continuation fields: `active_resume_kind`, `active_resume_origin`, `active_resume_pointer`, `active_bounded_segment`, `derived_execution_head`, `active_resume_result`, `continuity_handoff_file`, `recorded_continuity_handoff_file`, `missing_continuity_handoff_file`, and `resume_candidates`
-  - Those fields are the public top-level resume vocabulary only.
-  - Compatibility-only intake fields stay internal and are not part of the public top-level resume vocabulary
-- Uses the recovery ladder (`gpd resume` -> `gpd resume --recent` when needed -> `gpd:resume-work`) to pick up where you left off
+- `state.json.continuation` is the durable authority for resume state; `gpd resume` is the read-only local summary and `gpd resume --recent` is the workspace picker
+- Canonical continuation fields define the public resume vocabulary: `active_resume_kind`, `active_resume_origin`, `active_resume_pointer`, `active_bounded_segment`, `derived_execution_head`, `active_resume_result`, `continuity_handoff_file`, `recorded_continuity_handoff_file`, `missing_continuity_handoff_file`, and `resume_candidates`. Compatibility-only intake fields stay internal.
+- Use the recovery ladder (`gpd resume` -> `gpd resume --recent` -> `gpd:resume-work`) to pick up where you left off
 - Best first in-runtime command when returning to paused or interrupted work
-- This is the in-runtime continue path; for a current-workspace read-only recovery snapshot, use `gpd resume`
-- If you need to find the workspace first, use `gpd resume --recent`, then continue inside that workspace with `gpd:resume-work`
 
 Usage: `gpd:resume-work`
 
@@ -844,7 +845,7 @@ Usage: `gpd:literature-review "Sachdev-Ye-Kitaev model thermodynamics"`
 **Workflow presets**
 
 - `Paper/manuscript workflows` - First supported workflow preset for `write-paper`, `paper-build`, `peer-review`, and `arxiv-submission`; inspect it with `gpd presets list`, preview it with `gpd presets show <preset>`, and apply it from your normal terminal with `gpd presets apply <preset>` or through your runtime-specific `settings` command
-- `gpd doctor --runtime <runtime> --local|--global` - Check runtime-local paper-toolchain readiness from your normal terminal before using that preset. Add `--live-executable-probes` if you also want cheap local executable probes such as `pdflatex --version` or `wolframscript -version`. Failed preset rows degrade `write-paper`, but `paper-build` remains the build contract and `arxiv-submission` requires the built manuscript
+- `gpd doctor --runtime <runtime> --local` / `gpd doctor --runtime <runtime> --global` - Check the local or global runtime target from your normal terminal before using that preset. Add `--live-executable-probes` if you also want cheap local executable probes such as `pdflatex --version` or `wolframscript -version`. Failed preset rows degrade `write-paper`, but `paper-build` remains the build contract and `arxiv-submission` still requires the built manuscript
 - `gpd presets list` - Inspect the local preset catalog; presets resolve to the existing config keys and do not add a separate persisted preset block
 - `gpd presets show <preset>` - Preview one preset's bundle before applying it
 - `gpd presets apply <preset> [--dry-run]` - Apply or preview one preset from your normal terminal without inventing a separate preset schema
@@ -1215,7 +1216,7 @@ gpd:pause-work        # Before leaving mid-phase, capture a continuation handoff
 /clear                 # then run gpd resume in your normal terminal for the current workspace
 gpd resume             # Current-workspace read-only recovery snapshot from your normal terminal
 gpd resume --recent    # Find the workspace first in your normal terminal when you need to reopen a different one
-gpd:resume-work       # Continue in-runtime from the selected project state after reopening that workspace
+gpd:resume-work       # Continue in-runtime from the reopened project's canonical state after reopening that workspace
 gpd:suggest-next      # Fastest post-resume next command when you only need the next action
 gpd:progress --brief  # Short orientation snapshot if you need more context
 ```

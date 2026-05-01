@@ -38,7 +38,6 @@ from gpd.adapters.install_utils import (
     hook_python_interpreter,
     install_gpd_content,
     managed_hook_paths,
-    materialize_first_round_review_schema_headings,
     parse_jsonc,
     prune_empty_ancestors,
     remove_empty_json_object_file,
@@ -50,6 +49,7 @@ from gpd.adapters.install_utils import (
     strip_sub_tags,
 )
 from gpd.adapters.tool_names import build_runtime_alias_map, reference_translation_map, translate_for_runtime
+from gpd.mcp import managed_integrations as _managed_integrations
 
 logger = logging.getLogger(__name__)
 
@@ -139,28 +139,14 @@ def _project_managed_mcp_servers(
     cwd: Path | None = None,
 ) -> dict[str, dict[str, object]]:
     """Project shared optional integrations into OpenCode's neutral MCP shape."""
-    from gpd.mcp.managed_integrations import list_managed_integrations
-
-    managed_servers: dict[str, dict[str, object]] = {}
-    for integration in list_managed_integrations().values():
-        if not integration.is_configured(env, cwd=cwd, strict=True):
-            continue
-        managed_servers[integration.managed_server_key] = integration.projected_server_entry(
-            env,
-            cwd=cwd,
-            strict=True,
-        )
-
-    return managed_servers
+    return _managed_integrations.projected_managed_optional_mcp_servers(env, cwd=cwd)
 
 
 def _managed_mcp_server_keys() -> frozenset[str]:
     """Return GPD-managed OpenCode MCP server keys, including optional integrations."""
     from gpd.mcp.builtin_servers import GPD_MCP_SERVER_KEYS
-    from gpd.mcp.managed_integrations import list_managed_integrations
 
-    managed_keys = {integration.managed_server_key for integration in list_managed_integrations().values()}
-    return frozenset({*GPD_MCP_SERVER_KEYS, *managed_keys})
+    return frozenset(set(GPD_MCP_SERVER_KEYS) | set(_managed_integrations.managed_optional_mcp_server_keys()))
 
 
 # ---------------------------------------------------------------------------
@@ -467,7 +453,6 @@ def copy_agents_as_agent_files(
             src_root=source_root,
             protect_agent_prompt_body=True,
         )
-        content = materialize_first_round_review_schema_headings(content)
         if bridge_command:
             content = _rewrite_gpd_cli_invocations(content, bridge_command)
         content = convert_claude_to_opencode_frontmatter(content, path_prefix)

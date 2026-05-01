@@ -20,6 +20,7 @@ from gpd.registry import (
     load_agents_from_dir,
     render_command_visibility_sections_from_frontmatter,
 )
+from gpd.specs import SPECS_DIR as CANONICAL_SPECS_DIR
 
 
 def _write_review_contract_command(tmp_path: Path, file_name: str, review_contract_body: str) -> Path:
@@ -41,6 +42,9 @@ def _write_review_contract_command(tmp_path: Path, file_name: str, review_contra
 
 class TestParseFrontmatter:
     """Tests for _parse_frontmatter edge cases."""
+
+    def test_registry_exports_canonical_specs_dir(self) -> None:
+        assert registry.SPECS_DIR == CANONICAL_SPECS_DIR
 
     def test_valid_frontmatter(self) -> None:
         meta, body = _parse_frontmatter("---\nname: test\ndescription: hello\n---\nBody here.")
@@ -160,7 +164,15 @@ class TestParseAgentFile:
         assert agent.artifact_write_authority == "scoped_write"
         assert agent.shared_state_authority == "direct"
         assert agent.color == "blue"
-        assert agent.system_prompt == "System prompt."
+        assert agent.system_prompt.startswith("## Agent Requirements\n")
+        assert "Model-visible agent requirements. Follow this YAML." in agent.system_prompt
+        assert "commit_authority: orchestrator" in agent.system_prompt
+        assert "surface: public" in agent.system_prompt
+        assert "role_family: worker" in agent.system_prompt
+        assert "artifact_write_authority: scoped_write" in agent.system_prompt
+        assert "shared_state_authority: direct" in agent.system_prompt
+        assert "tools:\n- file_read\n- file_write" in agent.system_prompt
+        assert agent.system_prompt.endswith("System prompt.")
         assert agent.source == "agents"
 
     def test_agent_file_no_frontmatter(self, tmp_path: Path) -> None:
@@ -170,7 +182,8 @@ class TestParseAgentFile:
         assert agent.name == "bare-agent"
         assert agent.description == ""
         assert agent.tools == []
-        assert agent.system_prompt == "Just a body, no frontmatter."
+        assert agent.system_prompt.startswith("## Agent Requirements\n")
+        assert agent.system_prompt.endswith("Just a body, no frontmatter.")
 
     def test_agent_file_missing_optional_fields(self, tmp_path: Path) -> None:
         f = tmp_path / "minimal.md"
@@ -186,6 +199,8 @@ class TestParseAgentFile:
         assert agent.shared_state_authority == "return_only"
         assert agent.color == ""
         assert agent.source == "agents"
+        assert agent.system_prompt.startswith("## Agent Requirements\n")
+        assert agent.system_prompt.endswith("Prompt.")
 
     def test_agent_file_parses_explicit_commit_authority(self, tmp_path: Path) -> None:
         f = tmp_path / "direct.md"
@@ -266,7 +281,10 @@ class TestParseAgentFile:
         f = tmp_path / "nobody.md"
         f.write_text("---\nname: nobody\n---\n", encoding="utf-8")
         agent = _parse_agent_file(f, source="agents")
-        assert agent.system_prompt == ""
+        assert agent.system_prompt.startswith("## Agent Requirements\n")
+        assert "Model-visible agent requirements. Follow this YAML." in agent.system_prompt
+        assert "commit_authority:" in agent.system_prompt
+        assert agent.system_prompt.endswith("```")
 
     def test_agent_file_invalid_frontmatter_raises_with_path(self, tmp_path: Path) -> None:
         f = tmp_path / "broken.md"
@@ -1095,6 +1113,7 @@ class TestEncodingEdgeCases:
         f.write_bytes(b"\xef\xbb\xbf---\nname: bom-test\n---\nBody.")
         agent = _parse_agent_file(f, source="agents")
         assert agent.name == "bom-test"
+        assert agent.system_prompt.startswith("## Agent Requirements\n")
         assert "Body." in agent.system_prompt
 
 
@@ -1203,7 +1222,8 @@ class TestSkillDiscovery:
         assert skills["gpd-help"].content.startswith("## Command Requirements\n")
         assert skills["gpd-help"].content.endswith("Primary help body.")
         assert skills["gpd-debugger"].source_kind == "agent"
-        assert skills["gpd-debugger"].content == "Primary debugger prompt."
+        assert skills["gpd-debugger"].content.startswith("## Agent Requirements\n")
+        assert skills["gpd-debugger"].content.endswith("Primary debugger prompt.")
 
     def test_duplicate_skill_names_across_command_and_agent_raise(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1471,6 +1491,8 @@ class TestPublicAPI:
         assert agent.role_family == "coordination"
         assert agent.artifact_write_authority == "scoped_write"
         assert agent.shared_state_authority == "direct"
+        assert agent.system_prompt.startswith("## Agent Requirements\n")
+        assert agent.system_prompt.endswith("Test prompt.")
 
     def test_get_command_returns_correct_def(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         commands_dir = tmp_path / "commands"

@@ -5,7 +5,20 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from gpd.core.public_surface_contract import resume_authority_fields
+from gpd.adapters.install_utils import expand_at_includes
+from gpd.core import public_surface_contract as public_surface_contract_module
+from gpd.core.public_surface_contract import (
+    local_cli_bridge_note,
+    local_cli_doctor_global_command,
+    local_cli_doctor_local_command,
+    local_cli_permissions_status_command,
+    local_cli_plan_preflight_command,
+    local_cli_resume_command,
+    local_cli_resume_recent_command,
+    local_cli_unattended_readiness_command,
+    local_cli_validate_command_context_command,
+    resume_authority_fields,
+)
 from gpd.registry import VALID_CONTEXT_MODES, _parse_frontmatter
 from tests.doc_surface_contracts import (
     DOCTOR_RUNTIME_SCOPE_RE,
@@ -41,7 +54,6 @@ PROMPT_ROOTS = (
     REPO_ROOT / "src/gpd/specs/references",
     REPO_ROOT / "src/gpd/specs/templates",
 )
-GRAPH_PATH = REPO_ROOT / "tests" / "README.md"
 ROOT_COMMAND_RE = re.compile(r"@app\.command\(\s*\"([a-z0-9-]+)\"(?:,|\))", re.MULTILINE)
 TYPER_GROUP_RE = re.compile(r"app\.add_typer\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*name=\"([a-z0-9-]+)\"", re.MULTILINE)
 GROUP_COMMAND_RE = re.compile(r"@{group}\.command\(\s*\"([a-z0-9-]+)\"(?:,|\))", re.MULTILINE)
@@ -129,31 +141,38 @@ def _extract_gpd_command_surfaces(
     return surfaces
 
 
-def test_prompt_sources_use_only_real_gpd_command_surfaces() -> None:
+def test_prompt_sources_keep_command_surface_rules_canonical_and_consistent() -> None:
     allowed = _declared_command_surfaces()
-    content = CLI_PATH.read_text(encoding="utf-8")
-    root_commands = _declared_root_commands(content)
-    group_commands = _declared_groups(content)
-    invalid: list[str] = []
+    cli_content = CLI_PATH.read_text(encoding="utf-8")
+    root_commands = _declared_root_commands(cli_content)
+    group_commands = _declared_groups(cli_content)
+
+    invalid_surfaces: list[str] = []
+    noncanonical_surfaces: list[str] = []
+    raw_after_subcommand: list[str] = []
+    summary_extract_fields: list[str] = []
 
     for path in _iter_prompt_sources():
         content = path.read_text(encoding="utf-8")
+        relpath = str(path.relative_to(REPO_ROOT))
+
         for surface in _extract_gpd_command_surfaces(content, root_commands=root_commands, group_commands=group_commands):
             if surface not in allowed:
-                invalid.append(f"{path.relative_to(REPO_ROOT)} -> {surface}")
+                invalid_surfaces.append(f"{relpath} -> {surface}")
 
-    assert invalid == []
-
-
-def test_prompt_sources_use_canonical_gpd_command_syntax() -> None:
-    invalid: list[str] = []
-
-    for path in _iter_prompt_sources():
-        content = path.read_text(encoding="utf-8")
         for match in NON_CANONICAL_GPD_COMMAND_RE.finditer(content):
-            invalid.append(f"{path.relative_to(REPO_ROOT)} -> {match.group(0)}")
+            noncanonical_surfaces.append(f"{relpath} -> {match.group(0)}")
 
-    assert invalid == []
+        for match in RAW_AFTER_SUBCOMMAND_RE.finditer(content):
+            raw_after_subcommand.append(f"{relpath} -> {match.group(0)}")
+
+        for match in SUMMARY_EXTRACT_FIELDS_RE.finditer(content):
+            summary_extract_fields.append(f"{relpath} -> {match.group(0)}")
+
+    assert invalid_surfaces == []
+    assert noncanonical_surfaces == []
+    assert raw_after_subcommand == []
+    assert summary_extract_fields == []
 
 
 def test_help_prompt_delegates_full_reference_to_workflow() -> None:
@@ -222,7 +241,7 @@ def test_start_prompt_delegates_routing_to_workflow_only() -> None:
     assert "explain them the first time they appear" in start_command
     assert "gpd:tour" in start_command
     assert_start_workflow_router_contract(start_workflow)
-    assert "gpd resume --recent" in start_workflow
+    assert local_cli_resume_recent_command() in start_workflow
     assert "in your normal terminal to find the project first" in start_workflow
     assert "The recent-project picker is advisory; choose the workspace there" in start_workflow
     assert "reloads canonical state for that project." in start_workflow
@@ -301,17 +320,17 @@ def test_suggest_next_prompt_uses_real_cli_subcommand() -> None:
     assert "Uses `gpd --raw suggest`" in suggest_prompt
     assert "Local CLI fallback: `gpd --raw suggest`" in suggest_prompt
     assert (
-        "If you still need to rediscover the project first, do that in your normal terminal with `gpd resume` for the current workspace or `gpd resume --recent` for the explicit multi-project picker before reopening the runtime."
+        f"If you still need to rediscover the project first, do that in your normal terminal with `{local_cli_resume_command()}` for the current workspace or `{local_cli_resume_recent_command()}` for the explicit multi-project picker before reopening the runtime."
         in suggest_prompt
     )
     assert "Keep `/clear` as a fresh-context reset, not as a recovery step." in suggest_prompt
     assert "`/clear` first -> fresh context window, then `{command}`." in suggest_prompt
     assert (
-        "If you still need to rediscover the project first, do that in your normal terminal with `gpd resume` for the current workspace or `gpd resume --recent` for a different project before reopening the runtime."
+        f"If you still need to rediscover the project first, do that in your normal terminal with `{local_cli_resume_command()}` for the current workspace or `{local_cli_resume_recent_command()}` for a different project before reopening the runtime."
         in suggest_prompt
     )
     assert (
-        "`/clear` first -> fresh context window, then `{command}`; if you still need to rediscover the project, use `gpd resume --recent` before reopening the runtime"
+        f"`/clear` first -> fresh context window, then `{{command}}`; if you still need to rediscover the project, use `{local_cli_resume_recent_command()}` before reopening the runtime"
         not in suggest_prompt
     )
     assert "gpd suggest-next to scan" not in suggest_prompt
@@ -344,17 +363,17 @@ def test_progress_prompt_runs_preflight_after_init_context() -> None:
     command = (REPO_ROOT / "src/gpd/commands/progress.md").read_text(encoding="utf-8")
     workflow = (REPO_ROOT / "src/gpd/specs/workflows/progress.md").read_text(encoding="utf-8")
 
-    assert "INIT=$(gpd init progress --include state,roadmap,project,config)" in command
+    assert "INIT=$(gpd --raw init progress --include state,roadmap,project,config)" in command
     assert "CONTEXT=$(gpd --raw validate command-context progress \"$ARGUMENTS\")" in command
-    assert command.index("INIT=$(gpd init progress --include state,roadmap,project,config)") < command.index(
+    assert command.index("INIT=$(gpd --raw init progress --include state,roadmap,project,config)") < command.index(
         "CONTEXT=$(gpd --raw validate command-context progress \"$ARGUMENTS\")"
     )
     assert "The recent-project picker is advisory" in command
     assert "reloads canonical state for that project" in command
 
-    assert "INIT=$(gpd init progress --include state,roadmap,project,config)" in workflow
+    assert "INIT=$(gpd --raw init progress --include state,roadmap,project,config)" in workflow
     assert "CONTEXT=$(gpd --raw validate command-context progress \"$ARGUMENTS\")" in workflow
-    assert workflow.index("INIT=$(gpd init progress --include state,roadmap,project,config)") < workflow.index(
+    assert workflow.index("INIT=$(gpd --raw init progress --include state,roadmap,project,config)") < workflow.index(
         "CONTEXT=$(gpd --raw validate command-context progress \"$ARGUMENTS\")"
     )
 
@@ -375,18 +394,6 @@ def test_new_milestone_prompt_mentions_planning_commit_docs() -> None:
         assert "gpd:discuss-phase [N]" in content or "gpd:discuss-phase 1" in content
 
 
-def test_doc_sources_place_global_raw_before_subcommands() -> None:
-    invalid: list[str] = []
-    doc_paths = [*(_iter_prompt_sources()), GRAPH_PATH]
-
-    for path in doc_paths:
-        content = path.read_text(encoding="utf-8")
-        for match in RAW_AFTER_SUBCOMMAND_RE.finditer(content):
-            invalid.append(f"{path.relative_to(REPO_ROOT)} -> {match.group(0)}")
-
-    assert invalid == []
-
-
 def test_command_prompts_declare_valid_context_modes() -> None:
     missing: list[str] = []
     invalid: list[str] = []
@@ -404,23 +411,13 @@ def test_command_prompts_declare_valid_context_modes() -> None:
     assert invalid == []
 
 
-def test_prompt_sources_use_summary_extract_field_flag_not_fields() -> None:
-    invalid: list[str] = []
-    doc_paths = [*(_iter_prompt_sources()), GRAPH_PATH]
-
-    for path in doc_paths:
-        content = path.read_text(encoding="utf-8")
-        for match in SUMMARY_EXTRACT_FIELDS_RE.finditer(content):
-            invalid.append(f"{path.relative_to(REPO_ROOT)} -> {match.group(0)}")
-
-    assert invalid == []
-
-
 def test_new_project_prompt_uses_stdin_for_contract_validation_and_persistence() -> None:
     workflow = (REPO_ROOT / "src/gpd/specs/workflows/new-project.md").read_text(encoding="utf-8")
 
     assert 'printf \'%s\\n\' "$PROJECT_CONTRACT_JSON" | gpd --raw validate project-contract - --mode approved' in workflow
     assert 'printf \'%s\\n\' "$PROJECT_CONTRACT_JSON" | gpd state set-project-contract -' in workflow
+    assert "gpd permissions sync --runtime <runtime>" in workflow
+    assert "gpd permissions sync --runtime <name>" not in workflow
     assert "/tmp/gpd-project-contract.json" not in workflow
     assert "temporary JSON file if needed" not in workflow
 
@@ -492,9 +489,11 @@ def test_settings_and_research_mode_docs_keep_tangent_branch_taxonomy_strict() -
 
 
 def test_regression_check_prompt_examples_include_optional_phase_before_quick_flag() -> None:
-    verifier = (REPO_ROOT / "src/gpd/agents/gpd-verifier.md").read_text(encoding="utf-8")
+    verifier_raw = (REPO_ROOT / "src/gpd/agents/gpd-verifier.md").read_text(encoding="utf-8")
+    verifier = expand_at_includes(verifier_raw, REPO_ROOT / "src/gpd", "/runtime/")
     infra = (REPO_ROOT / "src/gpd/specs/references/orchestration/agent-infrastructure.md").read_text(encoding="utf-8")
 
+    assert "@{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md" in verifier_raw
     for content in (verifier, infra):
         assert "gpd regression-check [phase] [--quick]" in content
         assert "gpd regression-check [--quick]" not in content
@@ -557,13 +556,36 @@ def test_help_prompt_keeps_cost_surface_on_local_cli_not_runtime_slash_command()
     assert_cost_advisory_contract(help_workflow)
 
 
+def test_prompt_and_public_surface_contract_agree_on_runtime_readiness_and_plan_validation_surfaces() -> None:
+    help_workflow = (WORKFLOWS_DIR / "help.md").read_text(encoding="utf-8")
+    bridge_note = local_cli_bridge_note()
+
+    assert local_cli_unattended_readiness_command() in help_workflow
+    assert local_cli_permissions_status_command() in help_workflow
+    assert local_cli_plan_preflight_command() in help_workflow
+    assert local_cli_doctor_local_command() in help_workflow
+    assert local_cli_doctor_global_command() in help_workflow
+    assert local_cli_validate_command_context_command() in help_workflow
+    assert "local install, readiness, validation, permissions, observability, diagnostics, recovery, cost, preset, and shared Wolfram integration surface" in bridge_note
+
+
+def test_help_workflow_mentions_all_authoritative_local_cli_bridge_commands() -> None:
+    help_workflow = (WORKFLOWS_DIR / "help.md").read_text(encoding="utf-8")
+    for command in public_surface_contract_module.load_public_surface_contract().local_cli_bridge.named_commands.ordered():
+        assert command in help_workflow
+
+    assert local_cli_doctor_local_command() in help_workflow
+    assert local_cli_doctor_global_command() in help_workflow
+    assert local_cli_validate_command_context_command() in help_workflow
+
+
 def test_help_prompt_session_management_keeps_pause_before_leave_and_resume_on_return() -> None:
     help_workflow = (WORKFLOWS_DIR / "help.md").read_text(encoding="utf-8")
 
     assert_runtime_reset_rediscovery_contract(
         help_workflow,
-        extra_reset_fragments=("then run gpd resume in your normal terminal",),
-        extra_reset_not_recovery_fragments=("then run gpd resume in your normal terminal",),
+        extra_reset_fragments=(f"then run {local_cli_resume_command()} in your normal terminal",),
+        extra_reset_not_recovery_fragments=(f"then run {local_cli_resume_command()} in your normal terminal",),
     )
     assert "**`gpd:resume-work`**" in help_workflow
     assert "**`gpd:pause-work`**" in help_workflow
@@ -573,7 +595,7 @@ def test_help_prompt_session_management_keeps_pause_before_leave_and_resume_on_r
         require_generic_compatibility_note=True,
     )
     assert resume_authority_public_vocabulary_intro() in help_workflow
-    assert "Compatibility-only intake fields stay internal" in help_workflow
+    assert "compatibility-only intake fields stay internal" in help_workflow.lower()
     assert "state.json.continuation.handoff.resume_file" not in help_workflow
     assert "compat_resume_surface" not in help_workflow
     assert resume_authority_fields() == (

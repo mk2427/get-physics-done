@@ -15,6 +15,8 @@ Output ONLY reference content. Do NOT add project-specific analysis, git status,
 next-step suggestions, or commentary beyond the requested reference extract.
 </objective>
 
+Shared wrapper rule for every extract below: output only the requested section and do not rewrite, summarize, or invent alternate wording.
+
 <execution_context>
 @{GPD_INSTALL_DIR}/workflows/help.md
 </execution_context>
@@ -39,8 +41,6 @@ that workflow-owned reference and then STOP:
 - Stop before `## Command Index`.
 - Append this one wrapper-owned line: `Run \`gpd:help --all\` for the compact command index.`
 
-Do not rewrite, summarize, or invent alternate wording for any extracted section.
-
 ## Step 3: Compact Command Index (--all)
 
 Use the loaded workflow help file as the authority. Output ONLY this extract from
@@ -51,8 +51,6 @@ that workflow-owned reference and then STOP:
 - Include the workflow-owned `## Command Index` section.
 - Stop before `## Detailed Command Reference`.
 - Append this one wrapper-owned line: `Run \`gpd:help --command <name>\` for detailed help on one command.`
-
-Do not rewrite, summarize, or invent alternate wording for any extracted section.
 
 ## Step 4: Single Command Detail Extract (--command <name>)
 
@@ -67,6 +65,4 @@ Use the loaded workflow help file as the authority.
 - Include matching `Flags:`, `Usage:`, and `Result:` lines that belong to that command when present.
 - Stop before the next command block begins.
 - If no exact command matches, output exactly this one line and STOP: `Unknown command. Run \`gpd:help --all\` for the compact command index.`
-
-Do not rewrite, summarize, or invent alternate wording for any extracted section.
 </process>

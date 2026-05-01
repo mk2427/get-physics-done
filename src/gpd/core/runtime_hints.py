@@ -8,6 +8,7 @@ one normalized payload instead of stitching together multiple summaries.
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -48,6 +49,7 @@ from gpd.core.surface_phrases import (
 from gpd.core.surface_phrases import (
     workflow_preset_surface_note as _workflow_preset_surface_note_text,
 )
+from gpd.core.utils import dedupe_preserve_order
 from gpd.core.workflow_presets import (
     _normalize_latex_capability,
     resolve_workflow_preset_readiness,
@@ -58,6 +60,9 @@ __all__ = [
     "build_runtime_hint_payload",
     "workflow_preset_surface_note",
 ]
+
+
+logger = logging.getLogger(__name__)
 
 
 class RuntimeHintPayload(BaseModel):
@@ -88,21 +93,11 @@ def _model_dump(value: object) -> dict[str, object] | None:
     if hasattr(value, "model_dump"):
         try:
             dumped = value.model_dump(mode="json")  # type: ignore[assignment]
-        except Exception:
+        except Exception as exc:
+            logger.warning("Runtime hint serialization skipped %s: %s", type(value).__name__, exc)
             return None
         return dumped if isinstance(dumped, dict) else None
     return value if isinstance(value, dict) else None
-
-
-def _dedupe_text(items: list[str]) -> list[str]:
-    seen: set[str] = set()
-    merged: list[str] = []
-    for item in items:
-        if item in seen:
-            continue
-        seen.add(item)
-        merged.append(item)
-    return merged
 
 
 def workflow_preset_surface_note() -> str:
@@ -536,12 +531,8 @@ def build_runtime_hint_payload(
             for candidate in (getattr(reentry, "candidates", []) or [])
             if isinstance((candidate_payload := _model_dump(candidate)), dict)
         ]
-        has_recent_project_candidate = any(
-            _suggestion_text(candidate_payload, "source") == "recent_project"
-            for candidate_payload in candidate_payloads
-        )
         if isinstance(resume_context, dict):
-            if candidate_payloads and (has_recent_project_candidate or not recent_rows):
+            if candidate_payloads:
                 resume_context["project_reentry_candidates"] = candidate_payloads
                 selected_payload = _model_dump(getattr(reentry, "selected_candidate", None))
                 if isinstance(selected_payload, dict):
@@ -641,7 +632,7 @@ def build_runtime_hint_payload(
                 next_action_parts.append(next_action.strip())
     if include_workflow_presets:
         next_action_parts.extend(_workflow_next_actions(base_ready=base_ready))
-    next_actions = _dedupe_text(next_action_parts)
+    next_actions = dedupe_preserve_order(next_action_parts)
 
     return RuntimeHintPayload(
         source_meta=source_meta,

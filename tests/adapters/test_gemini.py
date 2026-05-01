@@ -273,8 +273,8 @@ class TestRewriteGeminiShellWorkflowGuidance:
             "```bash\n"
             "gpd config ensure-section\n"
             "# Compatibility note for installer text checks:\n"
-            "# INIT=$(gpd init progress --include state,config)\n"
-            "INIT=$(gpd init progress --include state,config --no-project-reentry)\n"
+            "# INIT=$(gpd --raw init progress --include state,config)\n"
+            "INIT=$(gpd --raw init progress --include state,config --no-project-reentry)\n"
             "if [ $? -ne 0 ]; then\n"
             '  echo "ERROR: gpd initialization failed: $INIT"\n'
             "  # STOP — display the error to the user and do not proceed.\n"
@@ -286,7 +286,7 @@ class TestRewriteGeminiShellWorkflowGuidance:
 
         assert "Run these as separate shell calls in Gemini auto-edit mode." in result
         assert "gpd config ensure-section" in result
-        assert "gpd init progress --include state,config --no-project-reentry" in result
+        assert "gpd --raw init progress --include state,config --no-project-reentry" in result
         assert "INIT=$(" not in result
         assert "if [ $? -ne 0 ]" not in result
 
@@ -824,9 +824,9 @@ class TestInstall:
 
         assert f"When shell steps call the GPD CLI, use {expected_bridge}" in command
         assert "Run the init command as its own shell call in Gemini auto-edit mode." in workflow
-        assert "INIT=$(gpd init new-project)" not in workflow
-        assert f'INIT=$({expected_bridge} init new-project)' not in workflow
-        assert f"{expected_bridge} init new-project" in workflow
+        assert "INIT=$(gpd --raw init new-project)" not in workflow
+        assert f'INIT=$({expected_bridge} --raw init new-project)' not in workflow
+        assert f"{expected_bridge} --raw init new-project" in workflow
         assert f"{expected_bridge} commit " in workflow
         assert ' gpd commit "' not in workflow
         assert f"{expected_bridge} --raw validate project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in command
@@ -857,7 +857,7 @@ class TestInstall:
         assert "INIT=$(" not in content
         assert "if [ $? -ne 0 ]" not in content
         assert expected_gemini_bridge(target) + " config ensure-section" in content
-        assert expected_gemini_bridge(target) + " init progress --include state,config --no-project-reentry" in content
+        assert expected_gemini_bridge(target) + " --raw init progress --include state,config --no-project-reentry" in content
 
 
     def test_install_agents_replace_runtime_placeholders(

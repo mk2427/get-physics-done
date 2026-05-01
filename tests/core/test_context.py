@@ -18,6 +18,7 @@ from gpd.core.context import (
     _merge_reference_intake,
     _normalize_phase_name,
     _read_todo_frontmatter,
+    _render_active_reference_context,
     _should_skip_research_scan_entry,
     _state_exists,
     init_execute_phase,
@@ -943,6 +944,45 @@ class TestInitExecutePhase:
         assert ctx["project_contract"]["references"][0]["id"] == "ref-benchmark"
         assert "Published comparison target" in ctx["active_reference_context"]
 
+    def test_active_reference_context_collapses_non_durable_contract_warnings(self) -> None:
+        rendered = _render_active_reference_context(
+            active_references=[],
+            effective_intake={
+                "must_read_refs": [],
+                "must_include_prior_outputs": [],
+                "user_asserted_anchors": [],
+                "known_good_baselines": [],
+                "context_gaps": [],
+                "crucial_inputs": [],
+            },
+            literature_review_files=[],
+            research_map_reference_files=[],
+            contract_validation={
+                "valid": False,
+                "errors": ["scope.question is required"],
+                "warnings": [
+                    "context_intake.user_asserted_anchors entry is not concrete enough to preserve as durable guidance: placeholder anchor",
+                    "context_intake.context_gaps entry is only a placeholder and does not preserve actionable guidance: TBD",
+                    "references.0.must_surface must be a boolean",
+                ],
+            },
+            contract_load_info={
+                "status": "loaded_with_schema_normalization",
+                "errors": ["context_intake is required"],
+                "warnings": [
+                    "context_intake.must_include_prior_outputs entry does not resolve to a project-local artifact: missing/path.md",
+                ],
+            },
+        )
+
+        assert rendered.count("non-durable contract-intake warning") == 2
+        assert "context_intake.user_asserted_anchors entry is not concrete enough to preserve as durable guidance" not in rendered
+        assert "context_intake.context_gaps entry is only a placeholder and does not preserve actionable guidance" not in rendered
+        assert "context_intake.must_include_prior_outputs entry does not resolve to a project-local artifact" not in rendered
+        assert "references.0.must_surface must be a boolean" in rendered
+        assert "context_intake is required" in rendered
+        assert "scope.question is required" in rendered
+
     def test_ingests_reference_artifacts_without_project_contract(self, tmp_path: Path) -> None:
         _setup_project(tmp_path)
         phase_dir = _create_phase_dir(tmp_path, "01-setup")
@@ -1249,11 +1289,12 @@ class TestInitPlanPhase:
 
         ctx = init_progress(tmp_path)
 
-        assert ctx["project_contract"] is None
+        assert ctx["project_contract"] is not None
+        assert ctx["project_contract"]["scope"]["question"] == contract.scope.question
         assert ctx["project_contract_gate"]["authoritative"] is False
         assert ctx["project_contract_gate"]["repair_required"] is True
         assert ctx["project_contract_gate"]["visible"] is True
-        assert ctx["contract_intake"] is None
+        assert ctx["contract_intake"]["must_read_refs"] == ["ref-benchmark"]
         assert ctx["selected_protocol_bundle_ids"] == []
         assert ctx["active_reference_count"] == 0
         assert ctx["effective_reference_intake"] == {
@@ -1678,7 +1719,8 @@ class TestInitNewMilestone:
 
         ctx = init_new_milestone(tmp_path)
 
-        assert ctx["project_contract"] is None
+        assert ctx["project_contract"] is not None
+        assert ctx["project_contract"]["references"][0]["role"] == "background"
         assert ctx["project_contract_load_info"]["status"] == "blocked_integrity"
         assert ctx["project_contract_validation"]["valid"] is False
         assert ctx["project_contract_gate"]["visible"] is True
@@ -1765,6 +1807,49 @@ class TestInitResume:
         ]
         assert "source" not in ctx["resume_candidates"][0]
         assert "compat_resume_surface" not in ctx
+
+    def test_resume_prefers_explicit_gpd_workspace_over_recent_project(self, tmp_path: Path) -> None:
+        workspace = tmp_path / "workspace"
+        recent_project = tmp_path / "recent-project"
+        data_root = tmp_path / "data"
+
+        workspace.mkdir()
+        recent_project.mkdir()
+        _setup_project(workspace)
+        (workspace / "GPD" / "current-agent-id.txt").write_text("agent-local\n", encoding="utf-8")
+
+        _setup_project(recent_project)
+        from gpd.core.state import default_state_dict
+
+        (recent_project / "GPD" / "state.json").write_text(
+            json.dumps(default_state_dict()),
+            encoding="utf-8",
+        )
+        (recent_project / "GPD" / "ROADMAP.md").write_text("# Roadmap\n", encoding="utf-8")
+        (recent_project / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
+        resume_path = recent_project / "GPD" / "phases" / "01-analysis" / ".continue-here.md"
+        resume_path.parent.mkdir(parents=True, exist_ok=True)
+        resume_path.write_text("resume\n", encoding="utf-8")
+        record_recent_project(
+            recent_project,
+            session_data={
+                "last_date": "2026-03-29T12:00:00+00:00",
+                "resume_file": "GPD/phases/01-analysis/.continue-here.md",
+            },
+            store_root=data_root,
+        )
+
+        ctx = init_resume(workspace, data_root=data_root)
+
+        assert ctx["project_root"] == workspace.resolve().as_posix()
+        assert ctx["project_root_source"] == "current_workspace"
+        assert ctx["project_root_auto_selected"] is False
+        assert ctx["project_reentry_mode"] == "current-workspace"
+        assert ctx["project_reentry_selected_candidate"] is not None
+        assert ctx["project_reentry_selected_candidate"]["source"] == "current_workspace"
+        assert ctx["has_interrupted_agent"] is True
+        assert ctx["interrupted_agent_id"] == "agent-local"
+        assert ctx["active_resume_kind"] == "interrupted_agent"
 
     def test_json_only_state_counts_as_existing(self, tmp_path: Path) -> None:
         from gpd.core.state import default_state_dict
@@ -2551,6 +2636,40 @@ class TestInitProgress:
         with pytest.raises(ConfigError, match="Invalid config.json values"):
             init_progress(tmp_path)
 
+    def test_progress_prefers_explicit_gpd_workspace_config_over_recent_project(self, tmp_path: Path) -> None:
+        workspace = tmp_path / "workspace"
+        recent_project = tmp_path / "recent-project"
+        data_root = tmp_path / "data"
+
+        workspace.mkdir()
+        recent_project.mkdir()
+        _setup_project(workspace)
+        _create_config(workspace, {"autonomy": "guided"})
+
+        _setup_project(recent_project)
+        from gpd.core.state import default_state_dict
+
+        (recent_project / "GPD" / "state.json").write_text(
+            json.dumps(default_state_dict()),
+            encoding="utf-8",
+        )
+        (recent_project / "GPD" / "ROADMAP.md").write_text("# Roadmap\n", encoding="utf-8")
+        (recent_project / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
+        resume_path = recent_project / "GPD" / "phases" / "01-analysis" / ".continue-here.md"
+        resume_path.parent.mkdir(parents=True, exist_ok=True)
+        resume_path.write_text("resume\n", encoding="utf-8")
+        record_recent_project(
+            recent_project,
+            session_data={
+                "last_date": "2026-03-29T12:00:00+00:00",
+                "resume_file": "GPD/phases/01-analysis/.continue-here.md",
+            },
+            store_root=data_root,
+        )
+
+        with pytest.raises(ConfigError, match="Invalid config.json values"):
+            init_progress(workspace, data_root=data_root)
+
     def test_progress_prefers_live_execution_pause_state(self, tmp_path: Path) -> None:
         _setup_project(tmp_path)
         _write_current_execution(
@@ -2675,12 +2794,13 @@ class TestInitProgress:
 
         ctx = init_progress(tmp_path)
 
-        assert ctx["project_contract"] is None
+        assert ctx["project_contract"] is not None
+        assert ctx["project_contract"]["claims"][0]["id"] == "claim-benchmark"
         assert ctx["project_contract_load_info"]["status"] == "loaded_with_schema_normalization"
         assert ctx["project_contract_gate"]["authoritative"] is False
         assert ctx["project_contract_gate"]["repair_required"] is True
         assert ctx["project_contract_gate"]["visible"] is True
-        assert ctx["contract_intake"] is None
+        assert ctx["contract_intake"]["must_read_refs"] == ["ref-benchmark"]
         assert "Recover known limiting behavior" not in ctx["active_reference_context"]
         assert "ref-benchmark" not in ctx["effective_reference_intake"]["must_read_refs"]
         assert "None confirmed in `state.json.project_contract.references` yet." in ctx["active_reference_context"]
@@ -2696,7 +2816,8 @@ class TestInitProgress:
         loaded = state_load(tmp_path)
         ctx = init_progress(tmp_path)
 
-        assert ctx["project_contract"] is None
+        assert ctx["project_contract"] is not None
+        assert ctx["project_contract"]["claims"][0]["id"] == "claim-benchmark"
         assert loaded.state["project_contract"]["claims"][0]["id"] == "claim-benchmark"
         assert "notes" not in loaded.state["project_contract"]["claims"][0]
         assert ctx["project_contract_gate"]["visible"] is True
@@ -2834,7 +2955,8 @@ class TestInitProgress:
         assert loaded is not None
         assert load_info["status"] == "blocked_integrity"
         assert any("duplicate" in error for error in load_info["errors"])
-        assert ctx["project_contract"] is None
+        assert ctx["project_contract"] is not None
+        assert ctx["project_contract"]["claims"][0]["id"] == "claim-benchmark"
         assert ctx["project_contract_load_info"]["status"] == "blocked_integrity"
         assert ctx["project_contract_gate"]["visible"] is True
         assert ctx["project_contract_gate"]["blocked"] is True

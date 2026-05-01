@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
+from textwrap import dedent
 
 import pytest
 
@@ -126,6 +128,225 @@ def _plan_contract_frontmatter_with_explicit_semantic_sections() -> str:
             "      relation: supports\n"
             "      verified_by: [test-main]"
         )
+    )
+
+
+def _summary_frontmatter_with_contract_ref(plan_contract_ref: str) -> str:
+    return (
+        "---\n"
+        "phase: 01\n"
+        "plan: 01\n"
+        "depth: standard\n"
+        "provides: []\n"
+        "completed: 2025-01-01\n"
+        f"plan_contract_ref: {plan_contract_ref}\n"
+        "---\n\nBody.\n"
+    )
+
+
+def _proof_claim_statement() -> str:
+    return "For all x > 0 and r_0 >= 0, F(x, r_0) >= 0."
+
+
+def _proof_claim_statement_sha256() -> str:
+    return hashlib.sha256(_proof_claim_statement().encode("utf-8")).hexdigest()
+
+
+def _proof_artifact_path(phase_dir: Path) -> Path:
+    return phase_dir / "derivations" / "theorem-proof.tex"
+
+
+def _proof_redteam_artifact_path(phase_dir: Path) -> Path:
+    return phase_dir / "01-01-PROOF-REDTEAM.md"
+
+
+def _sha256_path(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _write_proof_contract_phase(tmp_path: Path) -> tuple[Path, Path]:
+    phase_dir = tmp_path / "GPD" / "phases" / "01-proof"
+    phase_dir.mkdir(parents=True)
+    plan_path = phase_dir / "01-01-PLAN.md"
+    plan_path.write_text(
+        dedent(
+            f"""\
+            ---
+            phase: 01-proof
+            plan: 01
+            type: execute
+            wave: 1
+            depends_on: []
+            files_modified: []
+            interactive: false
+            contract:
+              schema_version: 1
+              scope:
+                question: Prove the full theorem without silently dropping r_0
+              context_intake:
+                must_include_prior_outputs: [GPD/phases/00-baseline/00-01-SUMMARY.md]
+              observables:
+                - id: obs-proof
+                  name: theorem proof obligation
+                  kind: proof_obligation
+                  definition: Prove the theorem for all x > 0 and r_0 >= 0
+              claims:
+                - id: claim-proof
+                  statement: "{_proof_claim_statement()}"
+                  claim_kind: theorem
+                  observables: [obs-proof]
+                  deliverables: [deliv-proof]
+                  acceptance_tests: [test-proof-alignment]
+                  parameters:
+                    - symbol: r_0
+                      domain_or_type: nonnegative real
+                    - symbol: x
+                      domain_or_type: positive real
+                  hypotheses:
+                    - id: hyp-r0
+                      text: r_0 >= 0
+                      symbols: [r_0]
+                    - id: hyp-x
+                      text: x > 0
+                      symbols: [x]
+                  quantifiers: [for all x > 0, for all r_0 >= 0]
+                  conclusion_clauses:
+                    - id: concl-main
+                      text: F(x, r_0) >= 0
+                  proof_deliverables: [deliv-proof]
+              deliverables:
+                - id: deliv-proof
+                  kind: derivation
+                  path: derivations/theorem-proof.tex
+                  description: Full theorem proof artifact
+              acceptance_tests:
+                - id: test-proof-alignment
+                  subject: claim-proof
+                  kind: claim_to_proof_alignment
+                  procedure: Red-team the theorem statement against the proof
+                  pass_condition: Every theorem parameter, hypothesis, and conclusion clause is accounted for
+              forbidden_proxies:
+                - id: fp-proof
+                  subject: claim-proof
+                  proxy: Prove only the r_0 = 0 subcase
+                  reason: Would silently drop a named theorem parameter
+              references:
+                - id: ref-proof-anchor
+                  kind: paper
+                  locator: Author et al., Journal, 2024
+                  role: background
+                  why_it_matters: Concrete grounding for the theorem statement and proof audit.
+                  applies_to: [claim-proof]
+                  must_surface: true
+                  required_actions: [read]
+              uncertainty_markers:
+                weakest_anchors: [Counterexample search scope remains finite]
+                disconfirming_observations: [A valid counterexample at r_0 > 0 invalidates the theorem]
+            ---
+
+            Proof plan fixture.
+            """
+        ),
+        encoding="utf-8",
+    )
+    proof_artifact = _proof_artifact_path(phase_dir)
+    proof_artifact.parent.mkdir(parents=True, exist_ok=True)
+    proof_artifact.write_text("% theorem proof artifact\n", encoding="utf-8")
+    proof_redteam_artifact = _proof_redteam_artifact_path(phase_dir)
+    proof_redteam_artifact.write_text(
+        dedent(
+            """\
+            ---
+            status: passed
+            reviewer: gpd-check-proof
+            claim_ids: [claim-proof]
+            proof_artifact_paths: [derivations/theorem-proof.tex]
+            ---
+
+            # Proof Redteam
+            """
+        ),
+        encoding="utf-8",
+    )
+    return phase_dir, plan_path
+
+
+def _proof_verification_content(
+    *,
+    phase_dir: Path,
+    proof_artifact_path: str = "derivations/theorem-proof.tex",
+    proof_artifact_sha256: str | None = None,
+    audit_artifact_path: str = "01-01-PROOF-REDTEAM.md",
+    audit_artifact_sha256: str | None = None,
+) -> str:
+    resolved_proof_artifact_sha256 = (
+        _sha256_path(_proof_artifact_path(phase_dir)) if proof_artifact_sha256 is None else proof_artifact_sha256
+    )
+    resolved_audit_artifact_sha256 = (
+        _sha256_path(_proof_redteam_artifact_path(phase_dir))
+        if audit_artifact_sha256 is None
+        else audit_artifact_sha256
+    )
+    return dedent(
+        f"""\
+        ---
+        phase: 01-proof
+        verified: 2026-04-02T12:00:00Z
+        status: passed
+        score: 3/3 contract targets verified
+        plan_contract_ref: GPD/phases/01-proof/01-01-PLAN.md#/contract
+        contract_results:
+          claims:
+            claim-proof:
+              status: passed
+              summary: Proof-backed claim verified.
+              linked_ids: [deliv-proof, test-proof-alignment]
+              proof_audit:
+                completeness: complete
+                reviewed_at: "2026-04-02T12:00:00Z"
+                reviewer: gpd-check-proof
+                proof_artifact_path: {proof_artifact_path}
+                proof_artifact_sha256: {resolved_proof_artifact_sha256}
+                audit_artifact_path: {audit_artifact_path}
+                audit_artifact_sha256: {resolved_audit_artifact_sha256}
+                claim_statement_sha256: {_proof_claim_statement_sha256()}
+                covered_hypothesis_ids: [hyp-r0, hyp-x]
+                missing_hypothesis_ids: []
+                covered_parameter_symbols: [r_0, x]
+                missing_parameter_symbols: []
+                uncovered_quantifiers: []
+                uncovered_conclusion_clause_ids: []
+                quantifier_status: matched
+                scope_status: matched
+                counterexample_status: none_found
+                stale: false
+          deliverables:
+            deliv-proof:
+              status: passed
+              path: derivations/theorem-proof.tex
+              summary: Proof artifact exists and matches the audited theorem.
+              linked_ids: [claim-proof, test-proof-alignment]
+          acceptance_tests:
+            test-proof-alignment:
+              status: passed
+              summary: Proof-to-claim alignment review completed.
+              linked_ids: [claim-proof, deliv-proof]
+          references:
+            ref-proof-anchor:
+              status: completed
+              completed_actions: [read]
+              missing_actions: []
+              summary: Concrete grounding anchor reviewed.
+          forbidden_proxies:
+            fp-proof:
+              status: rejected
+          uncertainty_markers:
+            weakest_anchors: [Counterexample search explored the stated regime only]
+            disconfirming_observations: [A counterexample at r_0 > 0 would break the theorem]
+        ---
+
+        Verification body.
+        """
     )
 
 # ---------------------------------------------------------------------------
@@ -1477,6 +1698,29 @@ class TestValidateFrontmatter:
         assert result.valid is False
         assert any("comparison_verdicts:" in error and "must use exact literal 'claim'" in error for error in result.errors)
 
+    def test_summary_rejects_symlinked_plan_contract_ref_escape(self, tmp_path: Path) -> None:
+        phase_dir = tmp_path / "GPD" / "phases" / "01-proof"
+        phase_dir.mkdir(parents=True)
+
+        outside_plan = tmp_path.parent / "outside-plan.md"
+        outside_plan.write_text(_valid_plan_contract_frontmatter(), encoding="utf-8")
+        plan_link = phase_dir / "01-01-PLAN.md"
+        try:
+            plan_link.symlink_to(outside_plan)
+        except OSError as exc:
+            pytest.skip(f"symlink creation unavailable: {exc}")
+
+        summary_path = phase_dir / "01-SUMMARY.md"
+        summary_path.write_text(
+            _summary_frontmatter_with_contract_ref("GPD/phases/01-proof/01-01-PLAN.md#/contract"),
+            encoding="utf-8",
+        )
+
+        result = validate_frontmatter(summary_path.read_text(encoding="utf-8"), "summary", source_path=summary_path)
+
+        assert result.valid is False
+        assert any("plan_contract_ref: must resolve inside the project root" in error for error in result.errors)
+
     def test_verification_status_passed_rejects_blocked_contract_results(self, tmp_path: Path):
         phase_dir = tmp_path / "GPD" / "phases" / "01-benchmark"
         phase_dir.mkdir(parents=True)
@@ -1512,6 +1756,96 @@ class TestValidateFrontmatter:
 
         assert result.valid is False
         assert "status: passed is inconsistent with non-passed contract_results targets: claim claim-benchmark" in result.errors
+
+    def test_verification_rejects_absolute_proof_audit_artifact_path(self, tmp_path: Path) -> None:
+        phase_dir, _ = _write_proof_contract_phase(tmp_path)
+        outside_proof_artifact = tmp_path.parent / "outside-proof.tex"
+        outside_proof_artifact.write_text("% outside proof artifact\n", encoding="utf-8")
+        verification_path = phase_dir / "01-VERIFICATION.md"
+        verification_path.write_text(
+            _proof_verification_content(
+                phase_dir=phase_dir,
+                proof_artifact_sha256=_sha256_path(outside_proof_artifact),
+                audit_artifact_path=str(outside_proof_artifact.resolve()),
+            ),
+            encoding="utf-8",
+        )
+
+        result = validate_frontmatter(
+            verification_path.read_text(encoding="utf-8"),
+            "verification",
+            source_path=verification_path,
+        )
+
+        assert result.valid is False
+        assert any(
+            "claim claim-proof proof_audit audit_artifact_path must be a project-relative path" in error
+            for error in result.errors
+        )
+
+    def test_verification_rejects_parent_traversal_proof_artifact_path_escape(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        phase_dir, _ = _write_proof_contract_phase(tmp_path)
+        outside_proof_artifact = tmp_path.parent / "outside-proof.tex"
+        outside_proof_artifact.write_text("% outside proof artifact\n", encoding="utf-8")
+        verification_path = phase_dir / "01-VERIFICATION.md"
+        verification_path.write_text(
+            _proof_verification_content(
+                phase_dir=phase_dir,
+                proof_artifact_path="../../../../outside-proof.tex",
+                proof_artifact_sha256=_sha256_path(outside_proof_artifact),
+            ),
+            encoding="utf-8",
+        )
+
+        result = validate_frontmatter(
+            verification_path.read_text(encoding="utf-8"),
+            "verification",
+            source_path=verification_path,
+        )
+
+        assert result.valid is False
+        assert any(
+            "claim claim-proof proof_audit proof_artifact_path must resolve inside the project root" in error
+            for error in result.errors
+        )
+
+    def test_verification_rejects_symlinked_proof_artifact_path_escape(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        phase_dir, _ = _write_proof_contract_phase(tmp_path)
+        outside_proof_artifact = tmp_path.parent / "outside-proof.tex"
+        outside_proof_artifact.write_text("% outside proof artifact\n", encoding="utf-8")
+        symlink_path = phase_dir / "derivations" / "theorem-proof.tex"
+        symlink_path.unlink()
+        try:
+            symlink_path.symlink_to(outside_proof_artifact)
+        except OSError as exc:
+            pytest.skip(f"symlink creation unavailable: {exc}")
+
+        verification_path = phase_dir / "01-VERIFICATION.md"
+        verification_path.write_text(
+            _proof_verification_content(
+                phase_dir=phase_dir,
+                proof_artifact_sha256=_sha256_path(outside_proof_artifact),
+            ),
+            encoding="utf-8",
+        )
+
+        result = validate_frontmatter(
+            verification_path.read_text(encoding="utf-8"),
+            "verification",
+            source_path=verification_path,
+        )
+
+        assert result.valid is False
+        assert any(
+            "claim claim-proof proof_audit proof_artifact_path must resolve inside the project root" in error
+            for error in result.errors
+        )
 
     def test_unknown_schema_raises(self):
         with pytest.raises(FrontmatterValidationError, match="Unknown schema"):

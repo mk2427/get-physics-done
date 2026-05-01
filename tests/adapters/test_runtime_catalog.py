@@ -25,7 +25,24 @@ from gpd.adapters.runtime_catalog import (
 )
 
 _RUNTIME_CATALOG_PATH = Path(__file__).resolve().parents[2] / "src" / "gpd" / "adapters" / "runtime_catalog.json"
+_RUNTIME_CATALOG_SCHEMA_PATH = Path(__file__).resolve().parents[2] / "src" / "gpd" / "adapters" / "runtime_catalog_schema.json"
 _RUNTIME_CONFIG_SURFACE_LABEL_RE = re.compile(r"^[A-Za-z0-9._-]+:[A-Za-z0-9+._-]+$")
+
+
+def _special_permission_surface_kinds() -> frozenset[str]:
+    return frozenset(
+        descriptor.capabilities.permission_surface_kind
+        for descriptor in iter_runtime_descriptors()
+        if descriptor.capabilities.permissions_surface != "config-file"
+        and descriptor.capabilities.permission_surface_kind != "none"
+    )
+
+
+def _catalog_entry_by_runtime_name(payload: list[dict[str, object]], runtime_name: str) -> dict[str, object]:
+    for entry in payload:
+        if entry.get("runtime_name") == runtime_name:
+            return entry
+    raise AssertionError(f"No runtime catalog entry found for {runtime_name}")
 
 
 def _iter_runtime_descriptors_from_payload(
@@ -41,6 +58,61 @@ def _iter_runtime_descriptors_from_payload(
     try:
         return runtime_catalog.iter_runtime_descriptors()
     finally:
+        runtime_catalog._load_catalog.cache_clear()
+
+
+def _iter_runtime_descriptors_from_schema(
+    schema_payload: dict[str, object],
+    *,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    schema_path = tmp_path / "runtime_catalog_schema.json"
+    schema_path.write_text(json.dumps(schema_payload), encoding="utf-8")
+    monkeypatch.setattr(runtime_catalog, "_runtime_catalog_schema_path", lambda: schema_path)
+    runtime_catalog._load_runtime_catalog_schema_shape.cache_clear()
+    schema_shape = runtime_catalog._load_runtime_catalog_schema_shape()
+    monkeypatch.setattr(runtime_catalog, "_RUNTIME_CATALOG_SHAPE", schema_shape)
+    monkeypatch.setattr(runtime_catalog, "_RUNTIME_ENTRY_REQUIRED_KEYS", schema_shape["entry_required_keys"])
+    monkeypatch.setattr(
+        runtime_catalog,
+        "_RUNTIME_ENTRY_OPTIONAL_KEYS",
+        schema_shape["entry_optional_keys"]
+        | frozenset(runtime_catalog._RUNTIME_CATALOG_SCHEMA_OVERRIDES.get("entry_optional_keys", ())),
+    )
+    monkeypatch.setattr(
+        runtime_catalog,
+        "_RUNTIME_ENTRY_ALLOWED_KEYS",
+        schema_shape["entry_required_keys"]
+        | (
+            schema_shape["entry_optional_keys"]
+            | frozenset(runtime_catalog._RUNTIME_CATALOG_SCHEMA_OVERRIDES.get("entry_optional_keys", ()))
+        ),
+    )
+    monkeypatch.setattr(runtime_catalog, "_RUNTIME_GLOBAL_CONFIG_STRATEGIES", frozenset(schema_shape["global_config_keys"].keys()))
+    monkeypatch.setattr(runtime_catalog, "_RUNTIME_INSTALL_HELP_EXAMPLE_SCOPES", schema_shape["install_help_example_scopes"])
+    monkeypatch.setattr(
+        runtime_catalog,
+        "_RUNTIME_CAPABILITY_ENUMS",
+        {
+            field_name: values
+            | frozenset(runtime_catalog._RUNTIME_CATALOG_SCHEMA_OVERRIDES.get("capability_enum_values", {}).get(field_name, ()))
+            for field_name, values in schema_shape["capability_enums"].items()
+        },
+    )
+    monkeypatch.setattr(runtime_catalog, "_RUNTIME_GLOBAL_CONFIG_KEYS", schema_shape["global_config_keys"])
+    monkeypatch.setattr(runtime_catalog, "_RUNTIME_CAPABILITY_KEYS", schema_shape["capability_keys"])
+    monkeypatch.setattr(runtime_catalog, "_RUNTIME_HOOK_PAYLOAD_KEYS", schema_shape["hook_payload_keys"])
+    monkeypatch.setattr(
+        runtime_catalog,
+        "_RUNTIME_LAUNCH_WRAPPER_PERMISSION_SURFACE_KINDS",
+        schema_shape["launch_wrapper_permission_surface_kinds"],
+    )
+    runtime_catalog._load_catalog.cache_clear()
+    try:
+        return runtime_catalog.iter_runtime_descriptors()
+    finally:
+        runtime_catalog._load_runtime_catalog_schema_shape.cache_clear()
         runtime_catalog._load_catalog.cache_clear()
 
 
@@ -171,6 +243,17 @@ def test_runtime_catalog_rejects_unknown_top_level_keys(tmp_path: Path, monkeypa
         _iter_runtime_descriptors_from_payload(payload, tmp_path=tmp_path, monkeypatch=monkeypatch)
 
 
+def test_runtime_catalog_rejects_schema_drift_against_fixed_schema(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    schema = deepcopy(json.loads(_RUNTIME_CATALOG_SCHEMA_PATH.read_text(encoding="utf-8")))
+    schema["entry_required_keys"] = [*schema["entry_required_keys"], "legacy_required_key"]
+
+    with pytest.raises(ValueError, match=r"runtime catalog entry 0 is missing required key\(s\): legacy_required_key"):
+        _iter_runtime_descriptors_from_schema(schema, tmp_path=tmp_path, monkeypatch=monkeypatch)
+
+
 def test_runtime_catalog_rejects_blank_selection_aliases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     payload = deepcopy(json.loads(_RUNTIME_CATALOG_PATH.read_text(encoding="utf-8")))
     payload[0]["selection_aliases"] = [payload[0]["selection_aliases"][0], " "]
@@ -288,13 +371,6 @@ def test_runtime_catalog_rejects_duplicate_install_flag(tmp_path: Path, monkeypa
         ),
         (
             lambda capabilities: capabilities.update(
-                permissions_surface="launch-wrapper",
-                permission_surface_kind="future.json:permissions.mode",
-            ),
-            r'runtime catalog entry 0\.capabilities\.permission_surface_kind must be "managed-launcher-wrapper" when permissions_surface=launch-wrapper',
-        ),
-        (
-            lambda capabilities: capabilities.update(
                 permissions_surface="unsupported",
                 permission_surface_kind="future.json:permissions.mode",
                 supports_runtime_permission_sync=True,
@@ -316,6 +392,49 @@ def test_runtime_catalog_rejects_incoherent_permission_surface_contract(
 
     with pytest.raises(ValueError, match=match):
         _iter_runtime_descriptors_from_payload(payload, tmp_path=tmp_path, monkeypatch=monkeypatch)
+
+
+def test_runtime_catalog_accepts_catalog_declared_launch_wrapper_special_values(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    schema = deepcopy(json.loads(_RUNTIME_CATALOG_SCHEMA_PATH.read_text(encoding="utf-8")))
+    schema["launch_wrapper_permission_surface_kinds"] = [
+        *schema["launch_wrapper_permission_surface_kinds"],
+        "future.json:launchWrapper",
+    ]
+    payload = deepcopy(json.loads(_RUNTIME_CATALOG_PATH.read_text(encoding="utf-8")))
+    _catalog_entry_by_runtime_name(payload, "gemini")["capabilities"]["permission_surface_kind"] = "future.json:launchWrapper"
+
+    catalog_path = tmp_path / "runtime_catalog.json"
+    catalog_path.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(runtime_catalog, "_catalog_path", lambda: catalog_path)
+    descriptors = _iter_runtime_descriptors_from_schema(schema, tmp_path=tmp_path, monkeypatch=monkeypatch)
+
+    gemini = next(descriptor for descriptor in descriptors if descriptor.runtime_name == "gemini")
+    assert gemini.capabilities.permission_surface_kind == "future.json:launchWrapper"
+
+
+def test_runtime_catalog_rejects_config_file_use_of_catalog_declared_launch_wrapper_special_value(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    schema = deepcopy(json.loads(_RUNTIME_CATALOG_SCHEMA_PATH.read_text(encoding="utf-8")))
+    schema["launch_wrapper_permission_surface_kinds"] = [
+        *schema["launch_wrapper_permission_surface_kinds"],
+        "future.json:launchWrapper",
+    ]
+    payload = deepcopy(json.loads(_RUNTIME_CATALOG_PATH.read_text(encoding="utf-8")))
+    _catalog_entry_by_runtime_name(payload, "codex")["capabilities"]["permission_surface_kind"] = "future.json:launchWrapper"
+    catalog_path = tmp_path / "runtime_catalog.json"
+    catalog_path.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(runtime_catalog, "_catalog_path", lambda: catalog_path)
+
+    with pytest.raises(
+        ValueError,
+        match=r"runtime catalog entry \d+\.capabilities\.permission_surface_kind must be a config surface label when permissions_surface=config-file",
+    ):
+        _iter_runtime_descriptors_from_schema(schema, tmp_path=tmp_path, monkeypatch=monkeypatch)
 
 
 def test_hook_payload_policy_uses_runtime_specific_overrides_and_merged_fallback() -> None:
@@ -401,7 +520,7 @@ def test_runtime_capabilities_are_explicit_per_runtime() -> None:
     assert get_hook_payload_policy("claude-code").supports_agent_payload_attribution is False
 
     assert gemini.permissions_surface == "launch-wrapper"
-    assert gemini.permission_surface_kind == "managed-launcher-wrapper"
+    assert gemini.permission_surface_kind in _special_permission_surface_kinds()
     assert gemini.supports_runtime_permission_sync is True
     assert gemini.supports_prompt_free_mode is True
     assert gemini.prompt_free_requires_relaunch is True
@@ -455,6 +574,7 @@ def test_runtime_capabilities_and_hook_payload_contract_stay_coherent() -> None:
     allowed_hook_surfaces = {"explicit", "none"}
     allowed_telemetry_sources = {"notify-hook", "none"}
     allowed_telemetry_completeness = {"best-effort", "none"}
+    special_permission_surface_kinds = _special_permission_surface_kinds()
 
     for runtime_name in list_runtime_names():
         capabilities = get_runtime_capabilities(runtime_name)
@@ -462,7 +582,7 @@ def test_runtime_capabilities_and_hook_payload_contract_stay_coherent() -> None:
 
         assert capabilities.permissions_surface in allowed_permissions_surfaces
         assert (
-            capabilities.permission_surface_kind == "managed-launcher-wrapper"
+            capabilities.permission_surface_kind in special_permission_surface_kinds
             or capabilities.permission_surface_kind == "none"
             or _RUNTIME_CONFIG_SURFACE_LABEL_RE.fullmatch(capabilities.permission_surface_kind) is not None
         )

@@ -22,14 +22,14 @@ Responding to referees is not adversarial -- it is collaborative improvement. Ev
 **Initialize context and locate paper:**
 
 ```bash
-INIT=$(gpd init phase-op)
+INIT=$(gpd --raw init phase-op)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
   # STOP — display the error to the user and do not proceed.
 fi
 ```
 
-Parse JSON for: `commit_docs`, `state_exists`, `project_exists`, `project_contract`, `project_contract_gate`, `project_contract_load_info`, `project_contract_validation`, `selected_protocol_bundle_ids`, `protocol_bundle_context`, `active_reference_context`, `derived_manuscript_reference_status`, `derived_manuscript_reference_status_count`.
+Parse JSON for: `commit_docs`, `state_exists`, `project_exists`, `project_contract`, `project_contract_gate`, `project_contract_load_info`, `project_contract_validation`, `selected_protocol_bundle_ids`, `protocol_bundle_context`, `active_reference_context`, `derived_manuscript_reference_status`, `derived_manuscript_reference_status_count`, `derived_manuscript_proof_review_status`.
 
 **Read mode settings:**
 
@@ -69,6 +69,7 @@ fi
 Use the literal `paste` sentinel when collecting inline report text. Do not pass the raw pasted referee report body as `$ARGUMENTS` to the strict preflight command.
 
 If review preflight exits nonzero because of missing project state, missing manuscript, missing referee report source when provided as a path, degraded review integrity, or missing required conventions, STOP and show the blocking issues before drafting responses. Treat `project_contract` as authoritative only when `project_contract_gate.authoritative` is true; otherwise the contract is visible but blocked, and the response should surface the blocker instead of relying on it. If `derived_manuscript_reference_status` is present, use it as a quick manuscript-local summary of what is already cited, what is still pending, and what probably needs a bibliography refresh; keep `${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json` and the other manuscript-root publication artifacts authoritative for strict response and packaging decisions.
+If `derived_manuscript_proof_review_status` is present, use it as the first-pass manuscript-local summary of proof-review freshness for theorem-bearing revisions; keep passed proof-redteam artifacts and the manuscript-root publication artifacts authoritative for strict response and packaging decisions.
 
 **Locate paper directory:**
 

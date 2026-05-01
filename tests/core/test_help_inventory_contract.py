@@ -48,3 +48,17 @@ def test_help_inventory_uses_runtime_neutral_framing_in_shared_source() -> None:
     assert all("/gpd:*" not in content for content in help_sources)
     assert any("canonical in-runtime command names" in content for content in help_sources)
     assert all("slash-command" not in content for content in help_sources)
+
+
+def test_help_workflow_paper_toolchain_doctor_row_is_single_sourced() -> None:
+    help_workflow = _read("src/gpd/specs/workflows/help.md")
+
+    assert len(re.findall(r"(?m)^\s*gpd doctor --runtime <runtime> --local\|--global\b.*$", help_workflow)) == 1
+    assert len(re.findall(r"(?m)^\s*gpd doctor --runtime <runtime> --global\b.*$", help_workflow)) == 0
+
+
+def test_help_command_uses_one_shared_extract_warning() -> None:
+    help_command = _read("src/gpd/commands/help.md")
+
+    assert help_command.count("Shared wrapper rule for every extract below") == 1
+    assert help_command.count("output only the requested section and do not rewrite, summarize, or invent alternate wording") == 1

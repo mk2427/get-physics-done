@@ -6,8 +6,8 @@ Mark a completed research stage (v1.0, v1.1, v2.0) as done. Creates historical r
 
 <required_reading>
 
-1. templates/milestone.md
-2. templates/milestone-archive.md
+1. `@{GPD_INSTALL_DIR}/templates/milestone.md`
+2. `@{GPD_INSTALL_DIR}/templates/milestone-archive.md`
 3. `GPD/ROADMAP.md`
 4. `GPD/REQUIREMENTS.md`
 5. `GPD/PROJECT.md`
@@ -27,7 +27,7 @@ When a research milestone completes:
 
 **Context Efficiency:** Archives keep ROADMAP.md constant-size and REQUIREMENTS.md milestone-scoped.
 
-**ROADMAP archive** uses `templates/milestone-archive.md` -- includes milestone header (status, phases, date), full phase details, milestone summary (decisions, key findings, open questions).
+**ROADMAP archive** uses `@{GPD_INSTALL_DIR}/templates/milestone-archive.md` -- includes milestone header (status, phases, date), full phase details, milestone summary (decisions, key findings, open questions).
 
 **REQUIREMENTS archive** contains all requirements marked complete with outcomes, traceability table with final status, notes on changed requirements.
 
@@ -334,7 +334,7 @@ This returns per-phase summaries with one-liners, provides/requires, and depende
 cat GPD/phases/*/*SUMMARY.md
 
 # Structured research state from init payloads
-INIT=$(gpd init milestone-op)
+INIT=$(gpd --raw init milestone-op)
 
 # Convention catalog (full reference)
 cat GPD/CONVENTIONS.md
@@ -621,7 +621,7 @@ Check branching strategy and offer merge options.
 Use `init milestone-op` for context, or load config directly:
 
 ```bash
-INIT=$(gpd init milestone-op)
+INIT=$(gpd --raw init milestone-op)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
   # STOP — display the error to the user and do not proceed.

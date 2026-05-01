@@ -15,17 +15,19 @@ from pathlib import Path
 import yaml
 
 from gpd.command_labels import canonical_command_label, canonical_skill_label, command_slug_from_label
+from gpd.core.model_visible_text import agent_visibility_note, command_visibility_note
 from gpd.core.review_contract_prompt import (
     normalize_review_contract_frontmatter_payload,
     render_review_contract_prompt,
+    review_contract_payload,
 )
+from gpd.specs import SPECS_DIR
 
 # ─── Package layout ──────────────────────────────────────────────────────────
 
 _PKG_ROOT = Path(__file__).resolve().parent  # gpd/
 AGENTS_DIR = _PKG_ROOT / "agents"
 COMMANDS_DIR = _PKG_ROOT / "commands"
-SPECS_DIR = _PKG_ROOT / "specs"
 
 # ─── Frontmatter parsing helpers ────────────────────────────────────────────
 
@@ -478,38 +480,61 @@ def _parse_agent_metadata_enum(
     return value
 
 
-def _review_contract_payload(review_contract: ReviewCommandContract) -> dict[str, object]:
-    """Return a stable mapping for model-visible review-contract rendering."""
-
-    return {
-        "schema_version": review_contract.schema_version,
-        "review_mode": review_contract.review_mode,
-        "required_outputs": list(review_contract.required_outputs),
-        "required_evidence": list(review_contract.required_evidence),
-        "blocking_conditions": list(review_contract.blocking_conditions),
-        "preflight_checks": list(review_contract.preflight_checks),
-        "stage_artifacts": list(review_contract.stage_artifacts),
-        "conditional_requirements": [
-            {
-                "when": requirement.when,
-                "required_outputs": list(requirement.required_outputs),
-                "required_evidence": list(requirement.required_evidence),
-                "blocking_conditions": list(requirement.blocking_conditions),
-                "blocking_preflight_checks": list(requirement.blocking_preflight_checks),
-                "stage_artifacts": list(requirement.stage_artifacts),
-            }
-            for requirement in review_contract.conditional_requirements
-        ],
-        "required_state": review_contract.required_state,
-    }
-
-
 def render_review_contract_section(review_contract: ReviewCommandContract | None) -> str:
     """Render a model-visible review-contract block for command prompt bodies."""
 
     if review_contract is None:
         return ""
-    return render_review_contract_prompt(_review_contract_payload(review_contract))
+    return render_review_contract_prompt(review_contract_payload(review_contract))
+
+
+def _agent_requirements_payload(
+    *,
+    tools: list[str],
+    commit_authority: str,
+    surface: str,
+    role_family: str,
+    artifact_write_authority: str,
+    shared_state_authority: str,
+) -> dict[str, object]:
+    return {
+        "commit_authority": commit_authority,
+        "surface": surface,
+        "role_family": role_family,
+        "artifact_write_authority": artifact_write_authority,
+        "shared_state_authority": shared_state_authority,
+        "tools": list(tools),
+    }
+
+
+def render_agent_requirements_section(
+    *,
+    tools: list[str],
+    commit_authority: str,
+    surface: str,
+    role_family: str,
+    artifact_write_authority: str,
+    shared_state_authority: str,
+) -> str:
+    """Render a model-visible agent-contract block for agent prompt bodies."""
+
+    rendered = yaml.safe_dump(
+        _agent_requirements_payload(
+            tools=tools,
+            commit_authority=commit_authority,
+            surface=surface,
+            role_family=role_family,
+            artifact_write_authority=artifact_write_authority,
+            shared_state_authority=shared_state_authority,
+        ),
+        sort_keys=False,
+        allow_unicode=False,
+    ).rstrip()
+    return (
+        "## Agent Requirements\n\n"
+        f"{agent_visibility_note()}\n\n"
+        f"```yaml\n{rendered}\n```"
+    )
 
 
 def _command_visibility_payload(
@@ -556,8 +581,7 @@ def render_command_requires_section(
     ).rstrip()
     return (
         "## Command Requirements\n\n"
-        "The following execution envelope, orchestration hints, and launch requirements are enforced before this command runs. "
-        "Plan around them directly in the work you produce.\n\n"
+        f"{command_visibility_note()}\n\n"
         f"```yaml\n{rendered}\n```"
     )
 
@@ -627,6 +651,33 @@ def render_command_visibility_sections_from_frontmatter(frontmatter: str, *, com
         requires=requires,
         review_contract=review_contract,
     )
+
+
+def _agent_model_content(
+    body: str,
+    *,
+    tools: list[str],
+    commit_authority: str,
+    surface: str,
+    role_family: str,
+    artifact_write_authority: str,
+    shared_state_authority: str,
+) -> str:
+    """Return the model-visible agent body, including enforced agent constraints."""
+
+    sections: list[str] = [
+        render_agent_requirements_section(
+            tools=tools,
+            commit_authority=commit_authority,
+            surface=surface,
+            role_family=role_family,
+            artifact_write_authority=artifact_write_authority,
+            shared_state_authority=shared_state_authority,
+        )
+    ]
+    if body:
+        sections.append(body)
+    return "\n\n".join(sections)
 
 
 def _command_model_content(
@@ -709,49 +760,65 @@ def _parse_agent_file(path: Path, source: str) -> AgentDef:
         _parse_tools(meta.get("tools"), owner_name=agent_name),
         _parse_tools(meta.get("allowed-tools"), field_name="allowed-tools", owner_name=agent_name),
     )
+    description = _parse_frontmatter_string_field(
+        meta.get("description"),
+        field_name="description",
+        owner_name=agent_name,
+    )
+    commit_authority = _parse_commit_authority(meta.get("commit_authority"), agent_name=agent_name)
+    surface = _parse_agent_metadata_enum(
+        meta.get("surface"),
+        field_name="surface",
+        agent_name=agent_name,
+        valid_values=VALID_AGENT_SURFACES,
+        default="internal",
+    )
+    role_family = _parse_agent_metadata_enum(
+        meta.get("role_family"),
+        field_name="role_family",
+        agent_name=agent_name,
+        valid_values=VALID_AGENT_ROLE_FAMILIES,
+        default="analysis",
+    )
+    artifact_write_authority = _parse_agent_metadata_enum(
+        meta.get("artifact_write_authority"),
+        field_name="artifact_write_authority",
+        agent_name=agent_name,
+        valid_values=VALID_AGENT_ARTIFACT_WRITE_AUTHORITIES,
+        default="scoped_write",
+    )
+    shared_state_authority = _parse_agent_metadata_enum(
+        meta.get("shared_state_authority"),
+        field_name="shared_state_authority",
+        agent_name=agent_name,
+        valid_values=VALID_AGENT_SHARED_STATE_AUTHORITIES,
+        default="return_only",
+    )
+    color = _parse_frontmatter_string_field(
+        meta.get("color"),
+        field_name="color",
+        owner_name=agent_name,
+    )
+    system_prompt = _agent_model_content(
+        body.strip(),
+        tools=tools,
+        commit_authority=commit_authority,
+        surface=surface,
+        role_family=role_family,
+        artifact_write_authority=artifact_write_authority,
+        shared_state_authority=shared_state_authority,
+    )
     return AgentDef(
         name=agent_name,
-        description=_parse_frontmatter_string_field(
-            meta.get("description"),
-            field_name="description",
-            owner_name=agent_name,
-        ),
-        system_prompt=body.strip(),
+        description=description,
+        system_prompt=system_prompt,
         tools=tools,
-        commit_authority=_parse_commit_authority(meta.get("commit_authority"), agent_name=agent_name),
-        surface=_parse_agent_metadata_enum(
-            meta.get("surface"),
-            field_name="surface",
-            agent_name=agent_name,
-            valid_values=VALID_AGENT_SURFACES,
-            default="internal",
-        ),
-        role_family=_parse_agent_metadata_enum(
-            meta.get("role_family"),
-            field_name="role_family",
-            agent_name=agent_name,
-            valid_values=VALID_AGENT_ROLE_FAMILIES,
-            default="analysis",
-        ),
-        artifact_write_authority=_parse_agent_metadata_enum(
-            meta.get("artifact_write_authority"),
-            field_name="artifact_write_authority",
-            agent_name=agent_name,
-            valid_values=VALID_AGENT_ARTIFACT_WRITE_AUTHORITIES,
-            default="scoped_write",
-        ),
-        shared_state_authority=_parse_agent_metadata_enum(
-            meta.get("shared_state_authority"),
-            field_name="shared_state_authority",
-            agent_name=agent_name,
-            valid_values=VALID_AGENT_SHARED_STATE_AUTHORITIES,
-            default="return_only",
-        ),
-        color=_parse_frontmatter_string_field(
-            meta.get("color"),
-            field_name="color",
-            owner_name=agent_name,
-        ),
+        commit_authority=commit_authority,
+        surface=surface,
+        role_family=role_family,
+        artifact_write_authority=artifact_write_authority,
+        shared_state_authority=shared_state_authority,
+        color=color,
         path=str(path),
         source=source,
     )
@@ -922,6 +989,7 @@ _SKILL_CATEGORY_MAP: dict[str, str] = {
     "gpd-paper": "paper",
     "gpd-literature": "research",
     "gpd-research": "research",
+    "gpd-digest-knowledge": "research",
     "gpd-discover": "research",
     "gpd-explain": "help",
     "gpd-map": "exploration",
@@ -965,6 +1033,72 @@ _SKILL_CATEGORY_MAP: dict[str, str] = {
     "gpd-help": "help",
     "gpd-suggest": "help",
     # Full-name entries for skills not captured by prefix matching.
+    "gpd-adversarial-critic": "verification",
+    "gpd-adversarial-review": "review",
+    # gpd-finding-adjudicator (brief 002 §5 + feedback_adjudicate_load_bearing):
+    # third-agent adjudicator dispatched from the /gpd:adversarial-review loop
+    # when Critic↔Fixer contradiction on a load-bearing finding is detected.
+    # Category = "review" matches the gpd-adversarial-review loop family
+    # (rather than "verification" which is the tactical-check family of
+    # gpd-verifier / gpd-adversarial-critic); adjudication is a review
+    # activity that runs an independent re-derivation, not a tactical check.
+    "gpd-finding-adjudicator": "review",
+    # gpd-paper-digester (brief 002 §5 + commit 5 spec): Draft-producing digester
+    # + Fixer-side partner to gpd-knowledge-critic in the per-paper adversarial
+    # loop of `/gpd:digest-knowledge --adversarial`. Category = "research"
+    # matches the gpd-digest-knowledge skill family (per the prefix entry above)
+    # rather than "review" which is the Critic-side family. The digester
+    # produces artifacts, so "research" (producer-side) is the canonical bucket.
+    "gpd-paper-digester": "research",
+    # gpd-knowledge-critic (brief 002 §5.2 + commit 5 spec): equation-correctness
+    # + OCR-hallucination + convention-match critic for knowledge docs and for
+    # restatement-kind assertions. Category = "review" matches the
+    # gpd-adversarial-review + gpd-finding-adjudicator loop family (the critic
+    # side, not the tactical-check side that `gpd-verifier` and
+    # `gpd-consistency-checker` live in under "verification").
+    "gpd-knowledge-critic": "review",
+    # gpd-cluster-auditor (brief 002 §4.1 step 3 + commit 6 spec): per-cluster
+    # cross-paper auditor that operates over a group of Stable kdocs produced
+    # by commit 5's per-paper adversarial digest. Emits a cluster-audit report
+    # consumed by the cross-cluster meta-auditor in phase 4. Category =
+    # "review" matches the gpd-knowledge-critic / gpd-finding-adjudicator /
+    # gpd-adversarial-review loop family.
+    "gpd-cluster-auditor": "review",
+    # gpd-meta-auditor (brief 002 §4.1 step 4 + commit 6 spec): cross-cluster
+    # consolidation agent that ingests every cluster-audit report plus the
+    # controlled-vocab seed and emits a single project-wide meta-audit report
+    # + convention-lock proposal set. Uses canonical-signature grouping
+    # (reusing commit 3's `normalize_eqn_body` via
+    # `gpd.core.meta_audit.canonical_signature`) + topic-keyword grouping +
+    # residual-row queue writer from `gpd.core.meta_audit`. Category =
+    # "review" matches the gpd-cluster-auditor / gpd-knowledge-critic /
+    # gpd-finding-adjudicator loop family.
+    "gpd-meta-auditor": "review",
+    # gpd-eqnref-integrator (brief 002 §4.1 step 5 + commit 7 spec):
+    # EQN-REF consolidation agent that consumes the APPROVED cross-cluster
+    # meta-audit report and emits the project's EQN-REF document following
+    # the 8-field schema at templates/eqn-reference-schema.md. Fires
+    # gpd-conventions MCP convention_set per axis when invoked with
+    # fire_conventions=True and the meta-audit verdict is APPROVED
+    # (0/0/0/0 + zero open blocking findings). Supports dry_run mode
+    # (emit EQN-REF, zero MCP calls) and revert mode (restore prior
+    # convention lock from eqn-ref-integrator.jsonl). Category = "review"
+    # matches the gpd-meta-auditor / gpd-cluster-auditor / gpd-knowledge-
+    # critic / gpd-finding-adjudicator / gpd-adversarial-review loop family;
+    # the integrator consolidates audited knowledge into conventions.
+    "gpd-eqnref-integrator": "review",
+    # gpd-assertion-digester (brief 002 §3.4 + commit 8 spec):
+    # Draft-producing digester + Fixer-side partner to gpd-knowledge-critic
+    # and gpd-adversarial-critic inside `/gpd:digest-assertion --adversarial`.
+    # Produces assertion YAML frontmatter + body per the assertion.md template.
+    # Restated-equation path: copies canonical_form verbatim from EQN-REF
+    # E-entry and computes upstream_ref_hash. Derived-consequence path: writes
+    # derivation_sketch from cited K-labels + E-entries. Category = "digest"
+    # mirrors gpd-paper-digester's placement (producer-side of the assertion
+    # trust chain, not the critic/review side). The assertion lifecycle
+    # (Draft→Stable) parallels the knowledge-doc lifecycle (same "digest"
+    # family bucket).
+    "gpd-assertion-digester": "digest",
     "gpd-bibliographer": "research",
     "gpd-check-todos": "management",
     "gpd-consistency-checker": "verification",
@@ -982,6 +1116,13 @@ _SKILL_CATEGORY_MAP: dict[str, str] = {
     "gpd-slides": "output",
     "gpd-research-mapper": "exploration",
     "gpd-verifier": "verification",
+    # gpd-sympy-calculator + gpd-compute-sympy (speedup C spec): SymPy-based
+    # symbolic + numerical calculator agent and its user-facing command skill.
+    # Category = "computation" sits alongside gpd-derive-equation (computation)
+    # under the producer-side family; both produce boxed/verified results
+    # rather than reviewing existing artifacts.
+    "gpd-sympy-calculator": "computation",
+    "gpd-compute-sympy": "computation",
 }
 VALID_SKILL_CATEGORIES: tuple[str, ...] = tuple(sorted({*set(_SKILL_CATEGORY_MAP.values()), "other"}))
 
@@ -1004,13 +1145,9 @@ def skill_categories() -> tuple[str, ...]:
     return VALID_SKILL_CATEGORIES
 
 
-def _canonical_skill_name_for_command(registry_name: str, command: CommandDef) -> str:
+def _canonical_skill_name_for_command(command: CommandDef) -> str:
     """Project a command registry entry into the canonical gpd-* skill namespace."""
-    if command.name.startswith("gpd:"):
-        return command.name.replace("gpd:", "gpd-", 1)
-    if registry_name.startswith("gpd-"):
-        return registry_name
-    return f"gpd-{registry_name}"
+    return command.name.replace("gpd:", "gpd-", 1)
 
 
 def _discover_skills(commands: dict[str, CommandDef], agents: dict[str, AgentDef]) -> dict[str, SkillDef]:
@@ -1020,7 +1157,7 @@ def _discover_skills(commands: dict[str, CommandDef], agents: dict[str, AgentDef
     for registry_name, command in sorted(commands.items()):
         if command.source != "commands":
             continue
-        skill_name = _canonical_skill_name_for_command(registry_name, command)
+        skill_name = _canonical_skill_name_for_command(command)
         if skill_name in result:
             raise ValueError(f"Duplicate skill name {skill_name!r} from command registry")
         result[skill_name] = SkillDef(
@@ -1118,7 +1255,6 @@ def get_skill(name: str) -> SkillDef:
     for candidate in (
         name.strip(),
         canonical_skill_label(name),
-        canonical_command_label(name),
         slug,
         f"gpd-{slug}" if slug else None,
     ):
@@ -1162,6 +1298,7 @@ __all__ = [
     "list_commands",
     "list_review_commands",
     "list_skills",
+    "render_agent_requirements_section",
     "render_command_visibility_sections",
     "render_command_visibility_sections_from_frontmatter",
     "render_review_contract_section",

@@ -16,6 +16,8 @@ __all__ = [
     "ACTIVE_TRACE_FILENAME",
     "ANALYSIS_DIR_NAME",
     "AGENT_ID_FILENAME",
+    "ASSERTION_DIR_NAME",
+    "ASSERTION_STATUS_LOCK_FILENAME",
     "CHECKPOINTS_FILENAME",
     "CONFIG_FILENAME",
     "CONTEXT_SUFFIX",
@@ -36,7 +38,10 @@ __all__ = [
     "EXECUTION_LINEAGE_REDUCER_VERSION",
     "EXECUTION_LINEAGE_SCHEMA_VERSION",
     "HOME_DATA_DIR_NAME",
+    "INVALIDATION_EVENTS_FILENAME",
+    "KNOWLEDGE_DIR_NAME",
     "LITERATURE_DIR_NAME",
+    "LOCKS_DIR_NAME",
     "MILESTONES_DIR_NAME",
     "MILESTONES_FILENAME",
     "MIN_PYTHON_MAJOR",
@@ -176,6 +181,21 @@ MILESTONES_DIR_NAME = "milestones"
 
 TODOS_DIR_NAME = "todos"
 """Subdirectory under GPD/ for todo items."""
+
+KNOWLEDGE_DIR_NAME = "knowledge"
+"""Subdirectory under GPD/ for reviewed knowledge documents."""
+
+ASSERTION_DIR_NAME = "assertions"
+"""Subdirectory under GPD/ for reviewed assertion documents."""
+
+LOCKS_DIR_NAME = "locks"
+"""Subdirectory under GPD/ for cross-process advisory lock files."""
+
+ASSERTION_STATUS_LOCK_FILENAME = "assertion_status"
+"""Stem for the assertion-status exclusive lock file (file_lock appends .lock)."""
+
+INVALIDATION_EVENTS_FILENAME = "invalidation_events.jsonl"
+"""Append-only JSONL ledger for assertion invalidation events under GPD/knowledge/."""
 
 LITERATURE_DIR_NAME = "literature"
 """Subdirectory under GPD/ for literature review files."""
@@ -509,6 +529,22 @@ class ProjectLayout:
     @property
     def todos_dir(self) -> Path:
         return self.gpd / TODOS_DIR_NAME
+
+    @property
+    def knowledge_dir(self) -> Path:
+        return self.gpd / KNOWLEDGE_DIR_NAME
+
+    @property
+    def assertion_dir(self) -> Path:
+        return self.gpd / ASSERTION_DIR_NAME
+
+    @property
+    def locks_dir(self) -> Path:
+        return self.gpd / LOCKS_DIR_NAME
+
+    @property
+    def assertion_status_lock(self) -> Path:
+        return self.locks_dir / ASSERTION_STATUS_LOCK_FILENAME
 
     @property
     def literature_dir(self) -> Path:

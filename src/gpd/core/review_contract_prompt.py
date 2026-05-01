@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Mapping
 
 import yaml
+
+from gpd.core.model_visible_text import review_contract_visibility_note
 
 VALID_REVIEW_MODES = ("publication", "review")
 VALID_REVIEW_PREFLIGHT_CHECKS = (
@@ -29,7 +32,10 @@ VALID_REVIEW_PREFLIGHT_CHECKS = (
     "reproducibility_ready",
     "manuscript_proof_review",
     "referee_report_source",
+    "phase_lookup",
     "phase_artifacts",
+    "phase_summaries",
+    "phase_proof_review",
 )
 VALID_REVIEW_REQUIRED_STATES = ("phase_executed",)
 VALID_REVIEW_CONDITIONAL_WHENS = (
@@ -61,6 +67,24 @@ REVIEW_CONTRACT_PROMPT_WRAPPER_KEY = "review_contract"
 REVIEW_CONTRACT_WRAPPER_KEYS = (REVIEW_CONTRACT_PROMPT_WRAPPER_KEY, REVIEW_CONTRACT_FRONTMATTER_KEY)
 REVIEW_CONTRACT_KEYS = frozenset(REVIEW_CONTRACT_FIELD_ORDER)
 REVIEW_CONTRACT_CONDITIONAL_KEYS = frozenset(REVIEW_CONTRACT_CONDITIONAL_FIELD_ORDER)
+
+
+def _review_contract_guidance() -> str:
+    review_modes = "|".join(VALID_REVIEW_MODES)
+    when_values = "|".join(VALID_REVIEW_CONDITIONAL_WHENS)
+    required_states = "|".join(VALID_REVIEW_REQUIRED_STATES)
+    preflight_checks = "|".join(VALID_REVIEW_PREFLIGHT_CHECKS)
+    return (
+        f"{review_contract_visibility_note()} "
+        "Closed schema; no extra keys. "
+        "Wrapper key: `review_contract`; "
+        "`schema_version` must be `1`; "
+        f"`review_mode`={review_modes}; "
+        f"`required_state`={required_states} when present; "
+        f"`preflight_checks`=`{preflight_checks}`; "
+        f"`conditional_requirements[].when`={when_values}; "
+        "`conditional_requirements[].blocking_preflight_checks` must reuse declared `preflight_checks` values."
+    )
 
 
 def _load_review_contract_payload(
@@ -151,7 +175,7 @@ def _normalize_review_contract_string_list(value: object, *, field_name: str) ->
     for item in value:
         entry = _normalize_review_contract_required_str(item, field_name=field_name)
         if entry in seen:
-            continue
+            raise ValueError(f"{field_name} must not contain duplicates")
         seen.add(entry)
         normalized.append(entry)
     return normalized
@@ -182,7 +206,7 @@ def _normalize_review_contract_choice_list(
             invalid_values.append(item)
             continue
         if matched in seen:
-            continue
+            raise ValueError(f"{field_name} must not contain duplicates")
         seen.add(matched)
         canonicalized.append(matched)
     if invalid_values:
@@ -382,6 +406,32 @@ def normalize_review_contract_frontmatter_payload(review_contract: object) -> di
     )
 
 
+def review_contract_payload(review_contract: object) -> dict[str, object] | None:
+    """Return the canonical serialized payload for a review-contract dataclass or mapping."""
+
+    if review_contract is None:
+        return None
+    if isinstance(review_contract, Mapping):
+        payload = dict(review_contract)
+    elif dataclasses.is_dataclass(review_contract):
+        payload = dataclasses.asdict(review_contract)
+    else:
+        raise ValueError("review contract must be a mapping or dataclass instance")
+
+    if not payload:
+        return None
+    required_state = payload.get("required_state")
+    if isinstance(required_state, str):
+        required_state = required_state.strip()
+        if required_state:
+            payload["required_state"] = required_state
+        else:
+            payload.pop("required_state", None)
+    elif not required_state:
+        payload.pop("required_state", None)
+    return payload or None
+
+
 def render_review_contract_prompt(review_contract: object) -> str:
     """Render a canonical model-visible review-contract section."""
 
@@ -391,18 +441,6 @@ def render_review_contract_prompt(review_contract: object) -> str:
     rendered_payload = dict(payload)
     if not rendered_payload.get("required_state"):
         rendered_payload.pop("required_state", None)
-    guidance_lines = [
-        "The model sees the following review contract, and command preflight/validation use the same structure. "
-        "Satisfy it directly in the generated artifacts."
-    ]
-    if any(
-        isinstance(requirement, dict) and requirement.get("blocking_preflight_checks")
-        for requirement in payload.get("conditional_requirements", [])
-        if isinstance(payload, dict)
-    ):
-        guidance_lines.append(
-            "Each `conditional_requirements[].blocking_preflight_checks` entry must also appear in `preflight_checks`."
-        )
     rendered = yaml.safe_dump(
         {REVIEW_CONTRACT_PROMPT_WRAPPER_KEY: rendered_payload},
         sort_keys=False,
@@ -410,6 +448,6 @@ def render_review_contract_prompt(review_contract: object) -> str:
     ).rstrip()
     return (
         "## Review Contract\n\n"
-        f"{' '.join(guidance_lines)}\n\n"
+        f"{_review_contract_guidance()}\n\n"
         f"```yaml\n{rendered}\n```"
     )

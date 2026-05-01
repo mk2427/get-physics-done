@@ -1,0 +1,5 @@
+# Generated canary run reports (runtime artifacts; not committed)
+canary-report-*.md
+
+# Per-run sandbox trees (timestamp-keyed under runs/)
+runs/

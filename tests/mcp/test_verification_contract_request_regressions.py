@@ -147,19 +147,28 @@ def test_run_contract_check_published_schema_keeps_schema_required_fields_strict
         assert field_schema["uniqueItems"] is True
     benchmark_requirement = _request_requirement_for_check(request_schema, "contract.benchmark_reproduction")
     assert benchmark_requirement is not None
-    metadata_schema = _schema_anyof_object(benchmark_requirement["properties"]["metadata"])
     observed_schema = _schema_anyof_object(benchmark_requirement["properties"]["observed"])
 
-    assert benchmark_requirement["required"] == ["metadata", "observed"]
-    assert metadata_schema["required"] == ["source_reference_id"]
-    assert metadata_schema["properties"]["source_reference_id"]["minLength"] == 1
-    assert metadata_schema["properties"]["source_reference_id"]["pattern"] == r"\S"
+    assert benchmark_requirement["required"] == ["observed"]
     assert observed_schema["required"] == ["metric_value", "threshold_value"]
     assert observed_schema["properties"]["metric_value"]["type"] == "number"
     assert observed_schema["properties"]["threshold_value"]["type"] == "number"
-    assert "null" not in json.dumps(metadata_schema["properties"]["source_reference_id"])
     assert "null" not in json.dumps(observed_schema["properties"]["metric_value"])
     assert "null" not in json.dumps(observed_schema["properties"]["threshold_value"])
+    assert "anyOf" in benchmark_requirement
+    metadata_branch = next(
+        branch for branch in benchmark_requirement["anyOf"] if "metadata" in branch.get("required", [])
+    )
+    contract_branch = next(
+        branch for branch in benchmark_requirement["anyOf"] if "contract" in branch.get("required", [])
+    )
+    metadata_schema = _schema_anyof_object(metadata_branch["properties"]["metadata"])
+    contract_schema = _schema_anyof_object(contract_branch["properties"]["contract"])
+    assert metadata_schema["required"] == ["source_reference_id"]
+    assert metadata_schema["properties"]["source_reference_id"]["minLength"] == 1
+    assert metadata_schema["properties"]["source_reference_id"]["pattern"] == r"\S"
+    assert "null" not in json.dumps(metadata_schema["properties"]["source_reference_id"])
+    assert contract_schema["required"] == ["schema_version", "scope", "context_intake", "uncertainty_markers"]
 
     proof_hypothesis_requirement = _request_requirement_for_check(request_schema, "contract.proof_hypothesis_coverage")
     assert proof_hypothesis_requirement is not None

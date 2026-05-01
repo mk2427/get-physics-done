@@ -44,18 +44,18 @@ def test_planner_prompt_surfaces_default_salvage_and_specific_semantics() -> Non
     assert "links[].relation" in planner_prompt
     assert "They default to `other` and may be omitted only when that generic category is actually intended." in planner_prompt
     assert "Treat `approach_policy` as execution policy only; it does not substitute for grounding." in planner_prompt
-    assert "**Defaulted semantic fields:** `observables[].kind`, `deliverables[].kind`, `acceptance_tests[].kind`, `references[].kind`, `references[].role`, and `links[].relation` all exist in the contract and default to `other`" in planner_prompt
+    assert "**Defaulted semantic fields:**" not in planner_prompt
     assert "Include `references[]` only when the contract does not already carry explicit grounding through `context_intake` or preserved scoping inputs." in planner_prompt
 
 
 def test_phase_prompt_surfaces_default_salvage_and_hard_plan_requirements() -> None:
     phase_prompt = _read_template("phase-prompt.md")
 
-    assert "Surface any hard validation requirements up front" in phase_prompt
+    assert "Surface machine-checkable prerequisites up front with `tool_requirements`; keep human-only setup in `researcher_setup`." in phase_prompt
     assert "declare it in frontmatter `tool_requirements` before drafting task prose" in phase_prompt
-    assert "visible on the plan surface before the body is written" in phase_prompt
-    assert "Gap-closure plans still use `type: execute`." in phase_prompt
-    assert "Mark verification-repair plans with `gap_closure: true`" in phase_prompt
+    assert phase_prompt.count("declare it in frontmatter `tool_requirements` before drafting task prose") == 1
+    assert "Gap-closure plans still use `type: execute`; mark verification-repair plans with `gap_closure: true`" in phase_prompt
+    assert "mark verification-repair plans with `gap_closure: true`" in phase_prompt
     assert "type: execute | tdd" in phase_prompt
     assert "# gap_closure: true # Optional. Use only for verification repair plans." in phase_prompt
     assert "The validator accepts a closed tool vocabulary today: `wolfram` and `command`" in phase_prompt
@@ -69,13 +69,26 @@ def test_phase_prompt_surfaces_default_salvage_and_hard_plan_requirements() -> N
     assert "references[].role" in phase_prompt
     assert "links[].relation" in phase_prompt
     assert "They default to `other`, but the more specific value remains mandatory when the plan already knows it." in phase_prompt
-    assert "The validator is strict here: for ordinary execution plans, the contract must carry non-empty claims, deliverables, acceptance tests, forbidden proxies, and a non-empty `contract.context_intake`" in phase_prompt
+    assert "For non-scoping plans, keep the contract concretely grounded rather than placeholder-only." in phase_prompt
     assert "Treat `approach_policy` as execution policy only; it does not satisfy grounding on its own." in phase_prompt
-    assert "If the contract does not already carry explicit concrete grounding elsewhere, references must be present and at least one must set `must_surface: true`." in phase_prompt
-    assert "`must_surface` is a boolean scalar. Use the YAML literals `true` and `false`;" in phase_prompt
-    assert "If `must_surface: true`, `required_actions[]` and `applies_to[]` must both stay non-empty." in phase_prompt
+    assert "Grounding still needs explicit anchors from the contract schema; do not omit required references." in phase_prompt
+    assert "`must_surface` uses YAML booleans." in phase_prompt
+    assert "When `must_surface` is `true`, keep `required_actions[]` and `applies_to[]` non-empty." in phase_prompt
     assert "`carry_forward_to[]` is free-text workflow scope only and must not be overloaded with contract IDs." in phase_prompt
     assert "`uncertainty_markers` must stay a YAML object, not a string or list." in phase_prompt
+    assert phase_prompt.count("When a plan genuinely depends on specialized tooling outside the guaranteed Python/SymPy baseline, declare it in frontmatter `tool_requirements` before drafting task prose.") == 1
+
+
+def test_planner_prompt_stays_compact_while_preserving_canonical_contract_wiring() -> None:
+    planner_prompt = (REPO_ROOT / "src/gpd/agents/gpd-planner.md").read_text(encoding="utf-8")
+
+    assert planner_prompt.count("contract:\n  schema_version: 1") >= 2
+    assert "<worked_examples>" not in planner_prompt
+    assert "<goal_backward>" not in planner_prompt
+    assert "Worked Examples: Complete PLAN.md Files" not in planner_prompt
+    assert "Goal-Backward Methodology for Physics" not in planner_prompt
+    assert "tool_requirements[].id" in planner_prompt
+    assert "must be unique within the list" in planner_prompt
 
 
 def test_proof_obligation_planning_surfaces_require_claim_audit_and_stale_review_gate() -> None:

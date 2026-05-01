@@ -44,6 +44,22 @@ __all__ = [
 # ─── Enums ──────────────────────────────────────────────────────────────────────
 
 
+class KnowledgeGateMode(StrEnum):
+    """How strictly knowledge-doc dependencies are enforced."""
+
+    OFF = "off"
+    WARN = "warn"
+    BLOCK = "block"
+
+
+class AssertionGateMode(StrEnum):
+    """How strictly assertion-doc dependencies are enforced."""
+
+    OFF = "off"
+    WARN = "warn"
+    BLOCK = "block"
+
+
 class AutonomyMode(StrEnum):
     """How much human oversight the system requires."""
 
@@ -280,6 +296,13 @@ MODEL_PROFILES: dict[str, dict[str, ModelTier]] = {
         "review": ModelTier.TIER_2,
         "paper-writing": ModelTier.TIER_2,
     },
+    "gpd-adversarial-critic": {
+        "deep-theory": ModelTier.TIER_1,
+        "numerical": ModelTier.TIER_1,
+        "exploratory": ModelTier.TIER_1,
+        "review": ModelTier.TIER_1,
+        "paper-writing": ModelTier.TIER_1,
+    },
 }
 
 # Default tier per agent (profile-independent fallback)
@@ -308,6 +331,7 @@ AGENT_DEFAULT_TIERS: dict[str, ModelTier] = {
     "gpd-referee": ModelTier.TIER_1,
     "gpd-experiment-designer": ModelTier.TIER_2,
     "gpd-notation-coordinator": ModelTier.TIER_2,
+    "gpd-adversarial-critic": ModelTier.TIER_1,
 }
 
 # ─── Config Model ───────────────────────────────────────────────────────────────
@@ -331,6 +355,8 @@ class GPDProjectConfig(BaseModel):
     research: bool = True
     plan_checker: bool = True
     verifier: bool = True
+    knowledge_gate: KnowledgeGateMode = KnowledgeGateMode.OFF
+    assertion_gate: AssertionGateMode = AssertionGateMode.OFF
     parallelization: bool = True
     max_unattended_minutes_per_plan: int = Field(default=45, ge=1)
     max_unattended_minutes_per_wave: int = Field(default=90, ge=1)
@@ -356,6 +382,7 @@ class GPDProjectConfig(BaseModel):
             return None
 
         normalized: dict[str, dict[str, str]] = {}
+        normalized_runtime_sources: dict[str, str] = {}
         try:
             valid_runtime_names = _valid_runtime_names()
         except RuntimeError as exc:
@@ -364,7 +391,8 @@ class GPDProjectConfig(BaseModel):
         supported_tiers = ", ".join(sorted(_VALID_MODEL_TIER_VALUES))
 
         for runtime, tier_map in value.items():
-            if runtime not in valid_runtime_names:
+            normalized_runtime_name = normalize_runtime_name(runtime)
+            if normalized_runtime_name not in valid_runtime_names:
                 raise ValueError(
                     f"model_overrides contains unknown runtime {runtime!r}; "
                     f"expected one of: {supported_runtimes}"
@@ -386,7 +414,14 @@ class GPDProjectConfig(BaseModel):
                 normalized_runtime[tier] = model.strip()
 
             if normalized_runtime:
-                normalized[runtime] = normalized_runtime
+                previous_runtime = normalized_runtime_sources.get(normalized_runtime_name)
+                if previous_runtime is not None:
+                    raise ValueError(
+                        f"model_overrides contains duplicate runtime entries for {normalized_runtime_name!r}: "
+                        f"{previous_runtime!r} and {runtime!r} both target the same runtime"
+                    )
+                normalized_runtime_sources[normalized_runtime_name] = runtime
+                normalized[normalized_runtime_name] = normalized_runtime
 
         return normalized or None
 
@@ -431,6 +466,8 @@ _EFFECTIVE_CONFIG_LEAVES: dict[str, Callable[[GPDProjectConfig], object]] = {
     "research_mode": lambda config: _enum_value(config.research_mode),
     "session_usd_budget": lambda config: config.session_usd_budget,
     "verifier": lambda config: config.verifier,
+    "knowledge_gate": lambda config: _enum_value(config.knowledge_gate),
+    "assertion_gate": lambda config: _enum_value(config.assertion_gate),
 }
 
 _EFFECTIVE_CONFIG_SECTIONS: dict[str, Callable[[GPDProjectConfig], dict[str, object]]] = {
@@ -454,6 +491,8 @@ _EFFECTIVE_CONFIG_SECTIONS: dict[str, Callable[[GPDProjectConfig], dict[str, obj
         "research": config.research,
         "plan_checker": config.plan_checker,
         "verifier": config.verifier,
+        "knowledge_gate": _enum_value(config.knowledge_gate),
+        "assertion_gate": _enum_value(config.assertion_gate),
     },
 }
 
@@ -493,6 +532,10 @@ _CONFIG_KEY_ALIASES: dict[str, str] = {
     "workflow.plan_checker": "plan_checker",
     "workflow.research": "research",
     "workflow.verifier": "verifier",
+    "knowledge_gate": "knowledge_gate",
+    "workflow.knowledge_gate": "knowledge_gate",
+    "assertion_gate": "assertion_gate",
+    "workflow.assertion_gate": "assertion_gate",
 }
 
 _CANONICAL_CONFIG_STORAGE_PATHS: dict[str, tuple[str, ...]] = {
@@ -678,6 +721,8 @@ _ALLOWED_CONFIG_ROOT_KEYS = frozenset(
         "research_mode",
         "verifier",
         "workflow",
+        "knowledge_gate",
+        "assertion_gate",
     }
 )
 
@@ -696,7 +741,7 @@ _ALLOWED_CONFIG_SECTION_KEYS = {
         }
     ),
     "planning": frozenset({"commit_docs"}),
-    "workflow": frozenset({"plan_checker", "research", "verifier"}),
+    "workflow": frozenset({"plan_checker", "research", "verifier", "knowledge_gate", "assertion_gate"}),
 }
 
 
@@ -844,6 +889,14 @@ def _model_from_parsed_config(parsed: dict[str, object]) -> GPDProjectConfig:
             session_usd_budget=_coalesce(
                 _get_nested(parsed, "session_usd_budget", section="execution", field="session_usd_budget"),
                 _CONFIG_DEFAULTS.session_usd_budget,
+            ),
+            knowledge_gate=_coalesce(
+                _get_nested(parsed, "knowledge_gate", section="workflow", field="knowledge_gate"),
+                _CONFIG_DEFAULTS.knowledge_gate,
+            ),
+            assertion_gate=_coalesce(
+                _get_nested(parsed, "assertion_gate", section="workflow", field="assertion_gate"),
+                _CONFIG_DEFAULTS.assertion_gate,
             ),
             model_overrides=_coalesce(
                 _get_nested(parsed, "model_overrides"),

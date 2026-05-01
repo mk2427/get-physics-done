@@ -162,6 +162,60 @@ def set_published_tool_input_schema(tool: object, schema: dict[str, object]) -> 
         _set_tool_attribute(tool, "parameters", copy.deepcopy(schema))
 
 
+def set_registered_and_published_tool_input_schema(mcp: object, tool: object, schema: dict[str, object]) -> None:
+    """Write one schema onto the public tool descriptor and its registered counterpart."""
+
+    set_published_tool_input_schema(tool, schema)
+    tool_name = getattr(tool, "name", None)
+    if not isinstance(tool_name, str):
+        return
+    tool_manager = getattr(mcp, "_tool_manager", None)
+    if tool_manager is None:
+        return
+    try:
+        registered_tools = tool_manager.list_tools()
+    except AttributeError:
+        return
+    for registered_tool in registered_tools:
+        if getattr(registered_tool, "name", None) == tool_name:
+            set_published_tool_input_schema(registered_tool, schema)
+
+
+def refresh_string_enum_property_schema(
+    schema: dict[str, object],
+    *,
+    property_name: str,
+    enum_values: list[str],
+) -> dict[str, object]:
+    """Refresh one string enum property regardless of anyOf branch order."""
+
+    refreshed = copy.deepcopy(schema)
+    properties = refreshed.get("properties") if isinstance(refreshed, dict) else None
+    if not isinstance(properties, dict):
+        return refreshed
+    property_schema = properties.get(property_name)
+    if not isinstance(property_schema, dict):
+        return refreshed
+
+    enum_schema: dict[str, object] | None = None
+    any_of = property_schema.get("anyOf")
+    if isinstance(any_of, list):
+        for branch in any_of:
+            if not isinstance(branch, dict):
+                continue
+            if branch.get("type") == "string" or "enum" in branch:
+                enum_schema = branch
+                break
+    elif property_schema.get("type") == "string" or "enum" in property_schema:
+        enum_schema = property_schema
+
+    if enum_schema is None:
+        return refreshed
+
+    enum_schema["enum"] = list(enum_values)
+    return refreshed
+
+
 def tighten_registered_tool_contracts(mcp: object) -> None:
     """Publish strict top-level tool schemas and stable validation envelopes."""
 

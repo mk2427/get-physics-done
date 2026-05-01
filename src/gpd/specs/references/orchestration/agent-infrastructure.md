@@ -96,7 +96,7 @@ All agents load conventions from `state.json convention_lock` at startup. Tier 1
 - Flag suspected convention mismatches to the orchestrator (do not resolve)
 - Do not write ASSERT_CONVENTION headers in output files
 
-Agents: project-researcher, phase-researcher, literature-reviewer, roadmapper, planner, plan-checker, research-synthesizer, research-mapper, bibliographer, referee, experiment-designer
+Agents: project-researcher, phase-researcher, literature-reviewer, roadmapper, planner, plan-checker, research-synthesizer, research-mapper, bibliographer, referee, experiment-designer, adversarial-critic
 
 **Tier 2 — Convention Enforcer (full tracking protocol, equation-working agents)**
 
@@ -106,7 +106,7 @@ Agents that write or verify equations must actively enforce conventions:
 - Apply the 5-point convention checklist (metric, Fourier, normalization, coupling, renormalization) when importing formulas from prior phases or references
 - Flag convention violations as DEVIATION Rule 5 (not just "suspected mismatch")
 
-Agents: executor, verifier, consistency-checker, debugger, paper-writer
+Agents: executor, verifier, consistency-checker, debugger, gpd-paper-writer
 
 **Tier 3 — Convention Authority (full protocol + establishment + evolution)**
 
@@ -181,6 +181,10 @@ Canonical ownership matrix:
 | gpd-debugger | `direct` | `gpd commit` for error patterns and session state |
 | gpd-executor | `direct` | `gpd commit` after each task (task commit protocol) |
 | gpd-planner | `direct` | `gpd commit` after plan creation and revision |
+| gpd-adversarial-critic | `orchestrator` | Returns `files_written`; orchestrator commits |
+| gpd-finding-adjudicator | `orchestrator` | Returns `files_written` (normally empty — verdict-only); orchestrator commits any edits authorized by the verdict |
+| gpd-knowledge-critic | `orchestrator` | Returns `files_written` (one `R{N}-REVIEW.md` under `GPD/reviews/<kdoc-slug>/`); orchestrator commits |
+| gpd-paper-digester | `orchestrator` | Returns `files_written` (Draft kdoc under `GPD/knowledge/` in digestion mode, in-place Fixer edits + `R{N}-FIX.md` in Fixer mode); orchestrator commits |
 | gpd-bibliographer | `orchestrator` | Returns `files_written`; orchestrator commits |
 | gpd-consistency-checker | `orchestrator` | Returns `files_written`; orchestrator commits |
 | gpd-experiment-designer | `orchestrator` | Returns `files_written`; orchestrator commits |
@@ -202,6 +206,11 @@ Canonical ownership matrix:
 | gpd-review-significance | `orchestrator` | Returns `files_written`; orchestrator commits |
 | gpd-roadmapper | `orchestrator` | Returns `files_written`; orchestrator commits |
 | gpd-verifier | `orchestrator` | Returns `files_written`; orchestrator commits |
+| gpd-cluster-auditor | `orchestrator` | Returns `files_written` (`GPD/reviews/<cluster>/cluster-audit.md`); orchestrator commits |
+| gpd-meta-auditor | `orchestrator` | Returns `files_written` (`GPD/meta-audit/meta-audit-report.md`, candidate-axes.md); orchestrator commits |
+| gpd-eqnref-integrator | `orchestrator` | Returns `files_written` (EQN-REF doc + revlog entries); orchestrator commits |
+| gpd-assertion-digester | `orchestrator` | Returns `files_written` (Draft assertion doc under `GPD/assertions/` in digestion mode, in-place Fixer edits + `R{N}-FIX.md` in Fixer mode); orchestrator commits |
+| gpd-sympy-calculator | `orchestrator` | Returns `files_written` (optional `GPD/knowledge/computed/<slug>-<timestamp>.md` note); orchestrator commits |
 
 **Rule:** Only `commit_authority: direct` agents call `gpd commit` directly. All other agents write files, report them in `gpd_return.files_written`, and leave commit/staging decisions to the orchestrating workflow.
 
@@ -249,7 +258,7 @@ Common state management commands used across agents:
 
 ```bash
 # Initialize execution context
-gpd init <command> <phase>
+gpd --raw init <command> <phase>
 
 # Update project state
 gpd state add-decision --phase <N> --summary "<text>" --rationale "<why>"
@@ -504,7 +513,7 @@ Not every phase needs every agent. Spawning unnecessary agents wastes tokens and
 | **Derivation** | derive, prove, show that, analytical, closed-form, exact result | executor, verifier | planner, plan-checker | experiment-designer, research-mapper |
 | **Numerical** | simulate, compute, discretize, grid, convergence, benchmark, finite-element, Monte Carlo | executor, verifier, experiment-designer | planner, plan-checker | bibliographer, notation-coordinator |
 | **Literature** | survey, review, compare approaches, what is known, prior work | phase-researcher, research-synthesizer | bibliographer | executor, verifier, experiment-designer |
-| **Paper-writing** | write paper, draft, manuscript, submit, LaTeX | paper-writer, bibliographer, referee | notation-coordinator | executor, phase-researcher, experiment-designer |
+| **Paper-writing** | write paper, draft, manuscript, submit, LaTeX | gpd-paper-writer, bibliographer, referee | notation-coordinator | executor, phase-researcher, experiment-designer |
 | **Formalism** | define, set up framework, establish conventions, Lagrangian, Hamiltonian, action | executor, notation-coordinator, verifier | planner, consistency-checker | experiment-designer, bibliographer |
 | **Analysis** | analyze, compare, interpret, extract, fit, scaling | executor, verifier | consistency-checker | experiment-designer, bibliographer |
 | **Validation** | verify, cross-check, reproduce, validate, test against | verifier, executor | consistency-checker, debugger | phase-researcher, experiment-designer |
@@ -529,9 +538,9 @@ planner → plan-checker               (checker validates the plan)
 experiment-designer → planner        (experiment design constrains plan)
 executor → verifier                  (verifier checks executor results)
 verifier → debugger                  (debugger investigates verification failures)
-paper-writer → bibliographer         (bibliographer verifies paper's citations)
-bibliographer → paper-writer         (paper-writer incorporates verified refs)
-paper-writer → referee               (referee reviews draft)
+gpd-paper-writer → bibliographer     (bibliographer verifies paper's citations)
+bibliographer → gpd-paper-writer     (gpd-paper-writer incorporates verified refs)
+gpd-paper-writer → referee           (referee reviews draft)
 notation-coordinator → executor      (coordinator resolves conventions before execution)
 ```
 
@@ -541,7 +550,7 @@ notation-coordinator → executor      (coordinator resolves conventions before 
 phase-researcher ‖ experiment-designer     (both read phase goal independently)
 multiple executors in same wave             (if files_modified don't overlap)
 4x project-researcher in new-project       (foundations ‖ methods ‖ landscape ‖ pitfalls)
-paper-writer (section A) ‖ paper-writer (section B)   (independent sections)
+gpd-paper-writer (section A) ‖ gpd-paper-writer (section B)   (independent sections)
 verifier ‖ consistency-checker              (both read results, different checks)
 ```
 
@@ -609,7 +618,7 @@ Different phase types have different context consumption patterns. The orchestra
 **Budget anomaly detection:**
 
 If the orchestrator detects it is consuming more than its allocated budget (e.g., >25% for a derivation phase), it should:
-1. Stop reading full SUMMARY files -- use `gpd summary-extract <path> --field one_liner` instead.
+1. Stop reading full SUMMARY files -- use `gpd --raw summary-extract <path> --field one_liner` instead.
 2. Stop re-reading STATE.md between waves (use cached version).
 3. Delegate any remaining analysis to a subagent.
 

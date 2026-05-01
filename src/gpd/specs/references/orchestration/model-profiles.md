@@ -44,6 +44,7 @@ If no override is configured for the active runtime, `gpd resolve-model` returns
 | gpd-referee              | tier-1        | tier-2      | tier-2        | tier-1   | tier-1          |
 | gpd-experiment-designer  | tier-2        | tier-1      | tier-2        | tier-2   | tier-3          |
 | gpd-notation-coordinator | tier-2        | tier-3      | tier-3        | tier-2   | tier-2          |
+| gpd-adversarial-critic   | tier-1        | tier-1      | tier-1        | tier-1   | tier-1          |
 
 ## Profile Philosophy
 
@@ -206,6 +207,16 @@ Profiles affect agent behavior, not just model selection. When a profile is acti
 | **exploratory**   | Constructive review. Focuses on whether the exploration covered sufficient ground and identified the most promising directions. Lenient on individual result rigor; strict on coverage and intellectual honesty. |
 | **review**        | Standard peer review. Balanced assessment of novelty, correctness, and significance. Checks reproducibility of key results. Evaluates whether conclusions are supported by the evidence presented.            |
 | **paper-writing** | Publication-readiness review. Evaluates clarity, logical flow, figure quality, and notation consistency alongside physics content. Applies the standards of the target journal.                                |
+
+### gpd-adversarial-critic
+
+| Profile           | Behavioral Change                                                                                                                                                                                             |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **deep-theory**   | Maximum adversarial depth. All 5 strategic challenges mandatory with full depth. Independent construction of alternative explanations from first principles. Assumption stress-testing includes formal proofs that assumptions hold (or fail) in the relevant regime. Zero tolerance for unproven load-bearing claims. |
+| **numerical**     | Numerics-focused challenges. Prioritizes Challenge 2 (assumption stress-testing with numerical parameter regimes) and Challenge 5 (robustness assessment with concrete parameter variation). Challenge 1 alternatives should include numerical coincidence as an explanation. Verifies that conclusions survive parameter perturbation. |
+| **exploratory**   | Rapid strategic triage. Minimum 3 of 5 challenges (prioritize Challenges 1-2: alternative explanations and assumption stress-testing). Focuses on FATAL-level strategic gaps only. Flags suspicious items as WARNING without deep investigation. Designed to catch strategic showstoppers quickly, not provide exhaustive review. |
+| **review**        | Standard strategic review. All 5 challenges attempted with full depth. Full 7-section verdict. Anti-anchoring protocol strictly enforced. Iterative refinement protocol active with convergence tracking. Maximum skepticism applied uniformly. |
+| **paper-writing** | Publication-readiness strategic challenge. Challenge 3 (strategic direction) prioritized: is the paper asking the right question? Challenge 1 alternatives focused on claims that will appear in print. Challenge 4 blast-radius scoped to the manuscript's dependency chain. Robustness assessment calibrated to referee expectations. |
 
 ### gpd-paper-writer
 

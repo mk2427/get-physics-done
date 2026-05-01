@@ -30,6 +30,7 @@ Agents override defaults based on their context consumption patterns. Agents tha
 | gpd-review-literature | < 35% | 35-50% | 50-60% | > 60% | claim cluster | Literature search results accumulate quickly; synthesize overlap after each claim cluster |
 | gpd-review-math | < 35% | 35-50% | 50-60% | > 60% | equation cluster | Keep only the 3-5 claim-central equations live; externalize side calculations immediately |
 | gpd-check-proof | < 35% | 35-50% | 50-60% | > 60% | proof inventory slice | Keep only the active theorem inventory, proof skeleton, and adversarial probe live; externalize side lemmas immediately |
+| gpd-adversarial-critic | < 40% | 40-60% | 60-75% | > 75% | review artifact + references | Reads artifact under review plus source references and CONVENTIONS.md; 7-section structured verdict output; needs headroom for independent alternative explanation construction |
 | gpd-review-physics | < 35% | 35-50% | 50-60% | > 60% | physical claim cluster | Focus on regime-of-validity and claim-support tables rather than full derivation history |
 | gpd-review-significance | < 35% | 35-50% | 50-60% | > 60% | venue-fit dimension | Compare contribution vs venue bar explicitly; avoid retaining unnecessary derivation detail |
 | gpd-referee | < 40% | 40-50% | 50-65% | > 65% | evaluation dimension | Start with 5 critical dimensions, expand if budget allows |
@@ -50,7 +51,7 @@ Three clusters based on how aggressively agents must manage context:
 - consistency-checker, debugger, literature-reviewer, phase-researcher, project-researcher, planner, plan-checker
 
 **Standard (GREEN < 40%):** Agents with typical read/write patterns.
-- executor, referee, bibliographer, experiment-designer, research-synthesizer, paper-writer, roadmapper, research-mapper
+- executor, referee, bibliographer, experiment-designer, research-synthesizer, paper-writer, roadmapper, research-mapper, adversarial-critic
 
 **Lenient (GREEN 40-45%):** Agents that produce short outputs or work with focused inputs.
 - notation-coordinator

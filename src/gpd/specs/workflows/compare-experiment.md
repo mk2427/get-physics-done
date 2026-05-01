@@ -20,7 +20,7 @@ Load project state and conventions to ensure correct unit systems and sign conve
 - Run:
 
 ```bash
-INIT=$(gpd init progress --include state)
+INIT=$(gpd --raw init progress --include state)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
   # STOP — display the error to the user and do not proceed.
@@ -231,27 +231,29 @@ Write COMPARISON.md:
 date: { YYYY-MM-DD }
 theory_source: { derivation/computation path }
 data_source: { experiment/measurement reference }
-protocol_bundle_ids (optional):
+protocol_bundle_ids:
   - { bundle-id }
-bundle_expectations (optional):
+bundle_expectations:
   - { additive provenance cue that materially informed the comparison }
-overall_agreement: good | tension | discrepancy
+overall_agreement: good
 chi2_ndof: { value }
 p_value: { value }
 max_tension_sigma: { value }
 comparison_verdicts:
   - subject_id: claim-id
-    subject_kind: claim|deliverable|acceptance_test|reference
-    subject_role: decisive|supporting|supplemental|other
+    subject_kind: claim
+    subject_role: decisive
     reference_id: ref-id
-    comparison_kind: benchmark|prior_work|experiment|cross_method|baseline|other
-    metric: chi2_ndof | relative_error | pull
+    comparison_kind: experiment
+    metric: chi2_ndof
     threshold: "<= 2 sigma"
-    verdict: pass | tension | fail | inconclusive
+    verdict: pass
     recommended_action: { what to do next }
 ---
 
 # Theory-Experiment Comparison
+
+If no selected protocol bundle materially informed the comparison, omit `protocol_bundle_ids` and `bundle_expectations` entirely.
 
 ## Quantities Compared
 

@@ -11,6 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from gpd.contracts import (
+    ContractApproachPolicy,
     ContractClaim,
     ContractProofParameter,
     ContractResults,
@@ -29,7 +30,6 @@ from gpd.contracts import (
 )
 from gpd.core.contract_validation import (
     is_authoritative_project_contract_schema_finding,
-    is_defaultable_singleton_project_contract_schema_finding,
     split_project_contract_schema_findings,
     validate_project_contract,
 )
@@ -70,29 +70,32 @@ def test_validate_project_contract_accepts_stage0_fixture() -> None:
     assert result.reference_count > 0
 
 
-def test_project_contract_schema_finding_helpers_keep_authoritative_and_defaultable_classes_distinct() -> None:
+def test_project_contract_schema_finding_helpers_keep_authoritative_and_blocking_classes_distinct() -> None:
     assert is_authoritative_project_contract_schema_finding("schema_version must be the integer 1") is True
     assert is_authoritative_project_contract_schema_finding("references.0.must_surface must be a boolean") is True
-    assert is_defaultable_singleton_project_contract_schema_finding(
-        "context_intake must be an object, not str"
-    ) is True
-    assert is_defaultable_singleton_project_contract_schema_finding(
-        "uncertainty_markers must be an object, not str"
-    ) is True
-    assert is_defaultable_singleton_project_contract_schema_finding(
-        "approach_policy must be an object, not str"
-    ) is False
 
 
-def test_split_project_contract_schema_findings_uses_public_helper_contract() -> None:
-    recoverable, blocking = split_project_contract_schema_findings(
-        [
-            "context_intake must be an object, not str",
-            "schema_version must be the integer 1",
-        ]
-    )
+def test_split_project_contract_schema_findings_separates_case_drift_from_blocking_errors() -> None:
+    findings = [
+        "legacy_notes: Extra inputs are not permitted",
+        "observables.0.kind must use exact canonical value: other",
+        "schema_version must be the integer 1",
+    ]
 
-    assert recoverable == ["context_intake must be an object, not str"]
+    recoverable, blocking = split_project_contract_schema_findings(findings, allow_case_drift_recovery=False)
+
+    assert recoverable == ["legacy_notes: Extra inputs are not permitted"]
+    assert blocking == [
+        "observables.0.kind must use exact canonical value: other",
+        "schema_version must be the integer 1",
+    ]
+
+    recoverable, blocking = split_project_contract_schema_findings(findings, allow_case_drift_recovery=True)
+
+    assert recoverable == [
+        "legacy_notes: Extra inputs are not permitted",
+        "observables.0.kind must use exact canonical value: other",
+    ]
     assert blocking == ["schema_version must be the integer 1"]
 
 
@@ -182,8 +185,10 @@ def test_contract_from_data_salvage_rejects_non_object_approach_policy() -> None
 
     parsed = parse_project_contract_data_salvage(contract)
 
-    assert parsed.contract is None
+    assert parsed.contract is not None
+    assert parsed.contract.approach_policy == ContractApproachPolicy()
     assert parsed.blocking_errors == ["approach_policy must be an object, not list"]
+    assert parsed.recoverable_errors == []
     assert contract_from_data_salvage(contract) is None
 
 
@@ -191,6 +196,7 @@ def test_contract_from_data_salvage_rejects_non_object_approach_policy() -> None
     ("field_name", "expected_error"),
     [
         ("schema_version", "schema_version is required"),
+        ("scope", "scope is required"),
         ("context_intake", "context_intake is required"),
         ("uncertainty_markers", "uncertainty_markers is required"),
     ],
@@ -204,6 +210,26 @@ def test_contract_from_data_salvage_rejects_missing_required_sections(field_name
     assert parsed.contract is None
     assert expected_error in parsed.blocking_errors
     assert contract_from_data_salvage(contract) is None
+
+
+def test_validate_project_contract_approved_mode_rejects_unknown_proof_deliverables() -> None:
+    contract = _load_contract_fixture()
+    contract["claims"][0]["proof_deliverables"] = ["deliv-missing"]
+
+    result = validate_project_contract(contract, mode="approved")
+
+    assert result.valid is False
+    assert "claim claim-benchmark references unknown proof deliverable deliv-missing" in result.errors
+
+
+def test_validate_project_contract_draft_mode_rejects_unknown_proof_deliverables() -> None:
+    contract = _load_contract_fixture()
+    contract["claims"][0]["proof_deliverables"] = ["deliv-missing"]
+
+    result = validate_project_contract(contract, mode="draft")
+
+    assert result.valid is False
+    assert "claim claim-benchmark references unknown proof deliverable deliv-missing" in result.errors
 
 
 def test_contract_from_data_salvage_rejects_missing_uncertainty_marker_subfields() -> None:
@@ -408,6 +434,17 @@ def test_parse_project_contract_data_salvage_preserves_blocking_errors_for_missi
     assert result.contract is not None
     assert "claims.0.statement is required" in result.blocking_errors
     assert contract_from_data_salvage(contract) is None
+
+
+def test_parse_project_contract_data_salvage_treats_singleton_shape_drift_as_blocking() -> None:
+    contract = _load_contract_fixture()
+    contract["context_intake"] = "not-a-dict"
+
+    result = parse_project_contract_data_salvage(contract)
+
+    assert result.contract is None
+    assert result.blocking_errors == ["context_intake must be an object, not str"]
+    assert result.recoverable_errors == []
 
 
 @pytest.mark.parametrize(
@@ -1003,6 +1040,65 @@ def test_validate_project_contract_approved_mode_accepts_project_local_prior_art
     assert result.mode == "approved"
 
 
+def test_validate_project_contract_approved_mode_rejects_project_local_prior_artifact_locator_without_project_root(
+    tmp_path: Path,
+) -> None:
+    contract = _load_contract_fixture()
+    _remove_incidental_grounding(contract)
+    artifact = tmp_path / "artifacts" / "benchmark" / "report.json"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_text("{}", encoding="utf-8")
+    contract["references"] = [
+        {
+            "id": "ref-anchor",
+            "kind": "prior_artifact",
+            "locator": "artifacts/benchmark/report.json",
+            "aliases": [],
+            "role": "background",
+            "why_it_matters": "Concrete prior artifact should not count without a resolved project root.",
+            "applies_to": ["claim-benchmark"],
+            "carry_forward_to": [],
+            "must_surface": True,
+            "required_actions": ["read"],
+        }
+    ]
+    contract["scope"]["unresolved_questions"] = []
+    contract["context_intake"]["must_read_refs"] = ["ref-anchor"]
+
+    result = validate_project_contract(contract, mode="approved")
+
+    assert result.valid is False
+    assert any("approved project contract requires at least one concrete anchor" in error for error in result.errors)
+
+
+def test_validate_project_contract_approved_mode_rejects_missing_project_local_prior_artifact_locator(
+    tmp_path: Path,
+) -> None:
+    contract = _load_contract_fixture()
+    _remove_incidental_grounding(contract)
+    contract["references"] = [
+        {
+            "id": "ref-anchor",
+            "kind": "prior_artifact",
+            "locator": "artifacts/benchmark/missing-report.json",
+            "aliases": [],
+            "role": "background",
+            "why_it_matters": "Missing prior artifacts should not count as approved grounding.",
+            "applies_to": ["claim-benchmark"],
+            "carry_forward_to": [],
+            "must_surface": True,
+            "required_actions": ["read"],
+        }
+    ]
+    contract["scope"]["unresolved_questions"] = []
+    contract["context_intake"]["must_read_refs"] = ["ref-anchor"]
+
+    result = validate_project_contract(contract, mode="approved", project_root=tmp_path)
+
+    assert result.valid is False
+    assert any("approved project contract requires at least one concrete anchor" in error for error in result.errors)
+
+
 def test_validate_project_contract_approved_mode_rejects_placeholder_must_surface_reference_masked_by_background_reference() -> None:
     contract = _load_contract_fixture()
     _remove_incidental_grounding(contract)
@@ -1067,7 +1163,7 @@ def test_validate_project_contract_approved_mode_accepts_concrete_must_surface_r
     assert result.mode == "approved"
 
 
-def test_validate_project_contract_warns_for_invalid_grounding_entries_with_concrete_anchor_present(
+def test_validate_project_contract_draft_mode_warns_for_invalid_grounding_entries_with_concrete_anchor_present(
     tmp_path: Path,
 ) -> None:
     contract = _load_contract_fixture()
@@ -1088,7 +1184,7 @@ def test_validate_project_contract_warns_for_invalid_grounding_entries_with_conc
         }
     )
 
-    result = validate_project_contract(contract, mode="approved", project_root=tmp_path)
+    result = validate_project_contract(contract, mode="draft", project_root=tmp_path)
 
     assert result.valid is True
     assert (
@@ -1102,6 +1198,40 @@ def test_validate_project_contract_warns_for_invalid_grounding_entries_with_conc
     assert (
         "reference ref-placeholder is must_surface but locator is not concrete enough to ground validation"
         in result.warnings
+    )
+
+
+def test_validate_project_contract_approved_mode_blocks_invalid_must_surface_locator_even_with_other_grounding(
+    tmp_path: Path,
+) -> None:
+    contract = _load_contract_fixture()
+    contract["context_intake"]["must_include_prior_outputs"] = ["fake/path"]
+    contract["context_intake"]["user_asserted_anchors"] = ["TBD"]
+    contract["references"].append(
+        {
+            "id": "ref-placeholder",
+            "kind": "paper",
+            "locator": "TBD",
+            "aliases": [],
+            "role": "benchmark",
+            "why_it_matters": "Placeholder must-surface anchor should be blocked in approved mode.",
+            "applies_to": ["claim-benchmark"],
+            "carry_forward_to": [],
+            "must_surface": True,
+            "required_actions": ["read"],
+        }
+    )
+
+    result = validate_project_contract(contract, mode="approved", project_root=tmp_path)
+
+    assert result.valid is False
+    assert (
+        "reference ref-placeholder is must_surface but locator is not concrete enough to ground validation"
+        in result.errors
+    )
+    assert (
+        "reference ref-placeholder is must_surface but locator is not concrete enough to ground validation"
+        not in result.warnings
     )
 
 
@@ -1187,6 +1317,32 @@ def test_validate_project_contract_approved_mode_accepts_short_concrete_locator_
 
     assert result.valid is True
     assert result.mode == "approved"
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("user_asserted_anchors", ["../tmp/off-repo-anchor.md"]),
+        ("known_good_baselines", ["/tmp/off-repo-anchor.md"]),
+    ],
+)
+def test_validate_project_contract_approved_mode_rejects_out_of_tree_path_like_grounding_without_project_root(
+    field_name: str, value: list[str]
+) -> None:
+    contract = _load_contract_fixture()
+    contract["references"] = []
+    _remove_incidental_grounding(contract)
+    contract["context_intake"]["must_include_prior_outputs"] = []
+    contract["context_intake"]["user_asserted_anchors"] = []
+    contract["context_intake"]["known_good_baselines"] = []
+    contract["context_intake"][field_name] = value
+    contract["scope"]["unresolved_questions"] = []
+
+    result = validate_project_contract(contract, mode="approved")
+
+    assert result.valid is False
+    assert result.mode == "approved"
+    assert any("approved project contract requires at least one concrete anchor" in error for error in result.errors)
 
 
 @pytest.mark.parametrize(
@@ -1675,6 +1831,18 @@ def test_validate_project_contract_rejects_coercive_schema_version_scalar() -> N
     assert "schema_version must be the integer 1" in result.errors
 
 
+def test_validate_project_contract_stops_after_blocking_salvage_errors() -> None:
+    contract = _load_contract_fixture()
+    contract["claims"][0].pop("statement")
+    contract["references"] = []
+
+    result = validate_project_contract(contract)
+
+    assert result.valid is False
+    assert result.errors == ["claims.0.statement is required"]
+    assert result.warnings == []
+
+
 def test_validate_project_contract_rejects_missing_schema_version() -> None:
     contract = _load_contract_fixture()
     contract.pop("schema_version")
@@ -1937,6 +2105,19 @@ def test_validate_project_contract_revalidates_typed_research_contract_instances
     assert result.mode == "approved"
     assert result.warnings == []
     assert result.errors == ["context_intake must be an object, not str"]
+
+
+def test_validate_project_contract_preserves_recoverable_warnings_when_normalization_fails() -> None:
+    contract = _load_contract_fixture()
+    contract.pop("context_intake")
+    contract["legacy_notes"] = "forwarded from a prior schema revision"
+
+    result = validate_project_contract(contract, mode="approved")
+
+    assert result.valid is False
+    assert result.mode == "approved"
+    assert "context_intake is required" in result.errors
+    assert "legacy_notes: Extra inputs are not permitted" in result.warnings
 
 
 @pytest.mark.parametrize(
@@ -2469,6 +2650,7 @@ def test_collect_plan_contract_integrity_errors_requires_theorem_inventory_for_p
     ("field_path", "value"),
     [
         ("context_intake.must_include_prior_outputs", ["TBD"]),
+        ("context_intake.must_include_prior_outputs", ["./RESULTS.md"]),
         ("context_intake.user_asserted_anchors", ["Nature benchmark"]),
         ("context_intake.known_good_baselines", ["Science benchmark"]),
         ("context_intake.crucial_inputs", ["Check the user's finite-volume cutoff choice before proceeding"]),
@@ -2528,7 +2710,6 @@ def test_collect_plan_contract_integrity_errors_rejects_placeholder_must_surface
     [
         ("paper", "Author et al., Journal, 2024"),
         ("other", "Einstein, Annalen der Physik, 1905"),
-        ("prior_artifact", "GPD/phases/03-missing-energy/03-01-SUMMARY.md"),
         ("spec", "https://example.org/missing-data-benchmark.csv"),
     ],
 )
@@ -2555,6 +2736,62 @@ def test_collect_plan_contract_integrity_errors_accepts_concrete_must_surface_re
     contract["context_intake"]["must_read_refs"] = ["ref-anchor"]
 
     errors = collect_plan_contract_integrity_errors(ResearchContract.model_validate(contract))
+
+    assert errors == []
+
+
+def test_collect_plan_contract_integrity_errors_rejects_rootless_project_local_must_surface_reference_locator() -> None:
+    contract = _load_contract_fixture()
+    _remove_incidental_grounding(contract)
+    contract["references"] = [
+        {
+            "id": "ref-anchor",
+            "kind": "prior_artifact",
+            "locator": "GPD/phases/03-missing-energy/03-01-SUMMARY.md",
+            "aliases": [],
+            "role": "benchmark",
+            "why_it_matters": "Local artifacts should not count as anchors until resolved against a project root.",
+            "applies_to": ["claim-benchmark"],
+            "carry_forward_to": [],
+            "must_surface": True,
+            "required_actions": ["read", "compare"],
+        }
+    ]
+    contract["context_intake"]["must_read_refs"] = ["ref-anchor"]
+
+    errors = collect_plan_contract_integrity_errors(ResearchContract.model_validate(contract))
+
+    assert "references must include at least one must_surface=true anchor" in errors
+
+
+def test_collect_plan_contract_integrity_errors_accepts_project_local_must_surface_reference_locator_with_project_root(
+    tmp_path: Path,
+) -> None:
+    contract = _load_contract_fixture()
+    _remove_incidental_grounding(contract)
+    artifact = tmp_path / "GPD" / "phases" / "03-missing-energy" / "03-01-SUMMARY.md"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_text("summary", encoding="utf-8")
+    contract["references"] = [
+        {
+            "id": "ref-anchor",
+            "kind": "prior_artifact",
+            "locator": "GPD/phases/03-missing-energy/03-01-SUMMARY.md",
+            "aliases": [],
+            "role": "benchmark",
+            "why_it_matters": "Resolved local artifact should satisfy the hard anchor requirement.",
+            "applies_to": ["claim-benchmark"],
+            "carry_forward_to": [],
+            "must_surface": True,
+            "required_actions": ["read", "compare"],
+        }
+    ]
+    contract["context_intake"]["must_read_refs"] = ["ref-anchor"]
+
+    errors = collect_plan_contract_integrity_errors(
+        ResearchContract.model_validate(contract),
+        project_root=tmp_path,
+    )
 
     assert errors == []
 

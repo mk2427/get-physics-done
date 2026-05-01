@@ -28,7 +28,6 @@ from gpd.adapters.install_utils import (
     convert_tool_references_in_body,
     ensure_update_hook,
     hook_python_interpreter,
-    materialize_first_round_review_schema_headings,
     parse_jsonc,
     process_attribution,
     protect_runtime_agent_prompt,
@@ -48,6 +47,7 @@ from gpd.adapters.install_utils import (
     finish_install as _finish_install,
 )
 from gpd.adapters.tool_names import build_runtime_alias_map, reference_translation_map, translate_for_runtime
+from gpd.mcp import managed_integrations as _managed_integrations
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +119,7 @@ _GEMINI_COMMAND_RUNTIME_NOTE = (
     "</gemini_runtime_notes>\n\n"
 )
 _GEMINI_NEW_PROJECT_INIT_BLOCK = """```bash
-INIT=$(gpd init new-project)
+INIT=$(gpd --raw init new-project)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
   # STOP — display the error to the user and do not proceed with the workflow.
@@ -128,13 +128,13 @@ fi
 _GEMINI_NEW_PROJECT_INIT_REPLACEMENT = """Run the init command as its own shell call in Gemini auto-edit mode. Do not wrap it in `INIT=$(...)` or an `if` block.
 
 ```bash
-gpd init new-project
+gpd --raw init new-project
 ```
 
 If the init command fails, stop, surface the error, and do not proceed with the workflow."""
 _GEMINI_SET_PROFILE_BLOCK = """```bash
 gpd config ensure-section
-INIT=$(gpd init progress --include state,config)
+INIT=$(gpd --raw init progress --include state,config)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
   # STOP — display the error to the user and do not proceed.
@@ -149,7 +149,7 @@ gpd config ensure-section
 Then run:
 
 ```bash
-gpd init progress --include state,config --no-project-reentry
+gpd --raw init progress --include state,config --no-project-reentry
 ```
 
 If the init command fails, stop, surface the error, and do not proceed."""
@@ -157,7 +157,7 @@ _GEMINI_SET_PROFILE_BLOCK_RE = re.compile(
     r"```bash\n"
     r"gpd config ensure-section\n"
     r"(?:#.*\n)*"
-    r"INIT=\$\((?:gpd init progress --include state,config(?: --no-project-reentry)?)\)\n"
+    r"INIT=\$\((?:gpd --raw init progress --include state,config(?: --no-project-reentry)?)\)\n"
     r"if \[ \$\? -ne 0 \]; then\n"
     r"  echo \"ERROR: gpd initialization failed: \$INIT\"\n"
     r"  # STOP — display the error to the user and do not proceed\.\n"
@@ -278,28 +278,14 @@ def _project_managed_mcp_servers(
     cwd: Path | None = None,
 ) -> dict[str, dict[str, object]]:
     """Project shared optional integrations into Gemini's ``mcpServers`` shape."""
-    from gpd.mcp.managed_integrations import list_managed_integrations
-
-    managed_servers: dict[str, dict[str, object]] = {}
-    for integration in list_managed_integrations().values():
-        if not integration.is_configured(env, cwd=cwd, strict=True):
-            continue
-        managed_servers[integration.managed_server_key] = integration.projected_server_entry(
-            env,
-            cwd=cwd,
-            strict=True,
-        )
-
-    return managed_servers
+    return _managed_integrations.projected_managed_optional_mcp_servers(env, cwd=cwd)
 
 
 def _managed_mcp_server_keys() -> frozenset[str]:
     """Return GPD-managed Gemini MCP server keys, including optional integrations."""
     from gpd.mcp.builtin_servers import GPD_MCP_SERVER_KEYS
-    from gpd.mcp.managed_integrations import list_managed_integrations
 
-    managed_keys = {integration.managed_server_key for integration in list_managed_integrations().values()}
-    return frozenset({*GPD_MCP_SERVER_KEYS, *managed_keys})
+    return frozenset(set(GPD_MCP_SERVER_KEYS) | set(_managed_integrations.managed_optional_mcp_server_keys()))
 
 
 def _rewrite_gpd_cli_invocations(content: str, bridge_command: str) -> str:
@@ -603,7 +589,7 @@ gpd commit "docs: generate dependency graph" --files GPD/DEPENDENCY-GRAPH.md
     )
     content = content.replace(
         """```bash
-INIT=$(gpd init phase-op)
+INIT=$(gpd --raw init phase-op)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
   # STOP — display the error to the user and do not proceed.
@@ -611,12 +597,12 @@ fi
 ```""",
         """```bash
 # Gemini auto-edit: run initialization directly instead of capturing it in INIT.
-gpd init phase-op
+gpd --raw init phase-op
 ```""",
     )
     content = content.replace(
         """```bash
-INIT=$(gpd init progress --include state,roadmap,config)
+INIT=$(gpd --raw init progress --include state,roadmap,config)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
   # STOP — display the error to the user and do not proceed.
@@ -624,12 +610,12 @@ fi
 ```""",
         """```bash
 # Gemini auto-edit: run initialization directly instead of capturing it in INIT.
-gpd init progress --include state,roadmap,config
+gpd --raw init progress --include state,roadmap,config
 ```""",
     )
     content = content.replace(
         """```bash
-INIT=$(gpd init progress --include state)
+INIT=$(gpd --raw init progress --include state)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
   # STOP — display the error to the user and do not proceed.
@@ -637,12 +623,12 @@ fi
 ```""",
         """```bash
 # Gemini auto-edit: run initialization directly instead of capturing it in INIT.
-gpd init progress --include state
+gpd --raw init progress --include state
 ```""",
     )
     content = content.replace(
         """```bash
-INIT=$(gpd init phase-op --include state,config "${PHASE_ARG:-}")
+INIT=$(gpd --raw init phase-op --include state,config "${PHASE_ARG:-}")
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
   # STOP — display the error to the user and do not proceed.
@@ -650,12 +636,12 @@ fi
 ```""",
         """```bash
 # Gemini auto-edit: run initialization directly instead of capturing it in INIT.
-gpd init phase-op --include state,config "${PHASE_ARG:-}"
+gpd --raw init phase-op --include state,config "${PHASE_ARG:-}"
 ```""",
     )
     content = content.replace(
         """```bash
-INIT=$(gpd init progress --include state,config)
+INIT=$(gpd --raw init progress --include state,config)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
   # STOP — display the error to the user and do not proceed.
@@ -663,7 +649,7 @@ fi
 ```""",
         """```bash
 # Gemini auto-edit: run initialization directly instead of capturing it in INIT.
-gpd init progress --include state,config
+gpd --raw init progress --include state,config
 ```""",
     )
     return _rewrite_gemini_capture_assignments(content)
@@ -988,7 +974,6 @@ def _copy_agents_gemini(
             install_scope=install_scope,
             src_root=source_root,
         )
-        content = materialize_first_round_review_schema_headings(content)
         content = process_attribution(content, attribution)
         content = protect_runtime_agent_prompt(content, "gemini")
         content = _convert_frontmatter_to_gemini(content)

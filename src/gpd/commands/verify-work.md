@@ -23,7 +23,10 @@ review-contract:
     - command_context
     - project_state
     - roadmap
+    - phase_lookup
     - phase_artifacts
+    - phase_summaries
+    - phase_proof_review
   required_state: phase_executed
 allowed-tools:
   - file_read
@@ -38,17 +41,17 @@ allowed-tools:
   - mcp__gpd_verification__run_contract_check
 ---
 
-<!-- Tool names and @ includes are platform-specific. The installer translates paths for your runtime. -->
-<!-- Allowed-tools are runtime-specific. Other platforms may use different tool interfaces. -->
+<!-- Tool names and @ includes are runtime-specific; the installer rewrites paths for your runtime. -->
+<!-- Allowed-tools are runtime-specific. Other platforms may expose different tool interfaces. -->
 
 <objective>
-Verify research results through systematic physics checks with persistent state.
+Verify research results through persistent physics checks.
 
-Purpose: Confirm that derivations are correct, numerical results are trustworthy, and physical conclusions are sound. One check at a time, plain text responses, no interrogation. When issues are found, automatically diagnose, classify severity, and prepare for resolution.
+Confirm that derivations are correct, numerical results are trustworthy, and physical conclusions are sound. One check at a time, plain text responses, no interrogation. When issues are found, diagnose them, classify severity, and prepare fix plans.
 
-Output: `GPD/phases/XX-name/XX-VERIFICATION.md` tracking all check results. This workflow is only valid once the phase has reached the `phase_executed` state. If issues are found, return diagnosed gaps with severity classification and verified fix plans ready for `gpd:execute-phase`.
+Output: `GPD/phases/XX-name/XX-VERIFICATION.md`. This workflow is only valid once the phase has reached the `phase_executed` state. If issues are found, return diagnosed gaps with severity classification and verified fix plans ready for `gpd:execute-phase`.
 
-Physics verification is fundamentally different from software testing. A software test has a binary pass/fail; a physics check has degrees of agreement, expected approximation errors, and regime-dependent validity. The verification framework accounts for this.
+Physics verification is not binary: checks can agree within expected approximation error or regime-dependent validity, and the framework should reflect that.
 </objective>
 
 <execution_context>
@@ -69,52 +72,10 @@ Phase: $ARGUMENTS (optional)
 
 <process>
 **CRITICAL: First, read the full workflow file using the file_read tool:**
-Read the file at {GPD_INSTALL_DIR}/workflows/verify-work.md — this contains the complete step-by-step instructions. Do NOT improvise. Follow the workflow file exactly.
+Read {GPD_INSTALL_DIR}/workflows/verify-work.md first and follow it exactly.
 
-Execute the workflow end-to-end.
-Preserve all workflow gates (session management, check presentation, diagnosis, fix planning, routing).
-
-The verification applies the following physics checks, selected based on the phase type:
-
-## For Analytical Derivations
-
-1. **Dimensional analysis** — Does every term in every equation have consistent dimensions? Track dimensions through every algebraic step, not just the final result.
-2. **Limiting cases** — Does the result reduce to known expressions in appropriate limits?
-   - Weak/strong coupling
-   - Large/small N
-   - High/low temperature
-   - Non-relativistic / classical limit
-   - Free theory limit
-   - Single-particle / mean-field limit
-3. **Symmetry preservation** — Does the result respect all symmetries of the original problem?
-   - Gauge invariance (if applicable)
-   - Lorentz / rotational / translational invariance
-   - Hermiticity of observables
-   - Unitarity of time evolution
-   - CPT or other discrete symmetries
-4. **Special values** — Does the result give correct answers for exactly solvable special cases?
-5. **Sign and factor checks** — Are overall signs physically sensible? (e.g., energy bounded below, probabilities non-negative, entropy non-negative) Are factors of 2, pi, hbar correct?
-6. **Logical completeness** — Does the derivation proceed from stated assumptions to conclusion without gaps? Are all approximations explicitly stated and justified?
-
-## For Numerical Results
-
-7. **Convergence tests** — Do results converge as resolution parameters are refined?
-   - Grid spacing / time step refinement
-   - Basis set / cutoff convergence
-   - Monte Carlo statistical convergence
-   - Extrapolation to continuum / thermodynamic limit
-8. **Analytical benchmarks** — Do numerical results match analytical predictions in regimes where both are available?
-9. **Conservation laws** — Are conserved quantities (energy, particle number, momentum, charge) actually conserved to expected precision?
-10. **Physical plausibility** — Are results physically reasonable?
-    - Correct order of magnitude
-    - Correct qualitative behavior (monotonicity, asymptotic behavior)
-    - No unphysical artifacts (negative probabilities, acausal propagation)
-11. **Reproducibility** — Do results reproduce when re-run with different random seeds, initial conditions, or numerical methods?
-
-## For Literature Comparisons
-
-12. **Quantitative agreement** — Do results agree with published values within stated uncertainties?
-13. **Discrepancy resolution** — If results disagree with literature, is the source of disagreement identified? (Different conventions, different approximations, error in prior work, or error in current work?)
+Execute the workflow end-to-end and preserve its session, diagnosis, fix-planning, and routing gates.
+The workflow file owns the detailed check taxonomy; this wrapper only bootstraps the canonical verification surfaces and delegates the physics checks.
 
 ## Severity Classification
 

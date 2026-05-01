@@ -44,6 +44,17 @@ def _run_contract_check_input_schema() -> dict[str, object]:
     return anyio.run(_load)
 
 
+def _suggest_contract_checks_input_schema() -> dict[str, object]:
+    from gpd.mcp.servers.verification_server import mcp
+
+    async def _load() -> dict[str, object]:
+        tools = await mcp.list_tools()
+        tool = next(tool for tool in tools if tool.name == "suggest_contract_checks")
+        return tool.inputSchema
+
+    return anyio.run(_load)
+
+
 def _schema_error_messages(schema: dict[str, object], payload: dict[str, object]) -> list[str]:
     from jsonschema import Draft202012Validator
 
@@ -51,8 +62,8 @@ def _schema_error_messages(schema: dict[str, object], payload: dict[str, object]
 def test_contract_server_singleton_drift_classifier_matches_core_contract_policy() -> None:
     from gpd.mcp.servers.verification_server import _is_defaultable_singleton_contract_error
 
-    assert _is_defaultable_singleton_contract_error("context_intake must be an object, not list") is True
-    assert _is_defaultable_singleton_contract_error("uncertainty_markers must be an object, not list") is True
+    assert _is_defaultable_singleton_contract_error("context_intake must be an object, not list") is False
+    assert _is_defaultable_singleton_contract_error("uncertainty_markers must be an object, not list") is False
     assert _is_defaultable_singleton_contract_error("approach_policy must be an object, not list") is False
 
 
@@ -286,6 +297,7 @@ def _proof_obligation_contract() -> dict[str, object]:
         "schema_version": 1,
         "scope": {"question": "Does the proof cover every named parameter and hypothesis?"},
         "context_intake": {
+            "must_read_refs": ["ref-proof-outline"],
             "must_include_prior_outputs": ["GPD/phases/00-baseline/00-01-SUMMARY.md"],
         },
         "observables": [
@@ -328,6 +340,20 @@ def _proof_obligation_contract() -> dict[str, object]:
                     {"id": "concl-uniform", "text": "The bound is uniform in r_0."},
                 ],
                 "proof_deliverables": ["deliv-proof"],
+            }
+        ],
+        "references": [
+            {
+                "id": "ref-proof-outline",
+                "kind": "other",
+                "locator": "doi:10.1234/proof-outline",
+                "aliases": [],
+                "role": "background",
+                "why_it_matters": "Anchors the theorem statement audited by the proof checks.",
+                "applies_to": ["claim-proof"],
+                "carry_forward_to": [],
+                "must_surface": True,
+                "required_actions": ["read"],
             }
         ],
         "deliverables": [
@@ -2008,6 +2034,54 @@ def test_run_contract_check_allows_case_only_salvage_for_proof_checks() -> None:
     assert result["contract_salvaged"] is True
 
 
+def test_run_contract_check_schema_and_runtime_stay_in_lockstep_for_recoverable_contract_payload_drift() -> None:
+    contract = _load_project_contract_fixture()
+    contract["context_intake"]["must_read_refs"] = "ref-benchmark"
+    contract["deliverables"][0]["kind"] = "Figure"
+    contract["references"][0]["required_actions"] = "Read"
+
+    request = {
+        "request": {
+            "check_key": "contract.benchmark_reproduction",
+            "contract": contract,
+            "binding": {"claim_ids": ["claim-benchmark"]},
+            "metadata": {"source_reference_id": "ref-benchmark"},
+            "observed": {"metric_value": 0.01, "threshold_value": 0.02},
+        }
+    }
+
+    schema_messages = _schema_error_messages(_run_contract_check_input_schema(), request)
+    result = _call_verification_tool("run_contract_check", request)
+
+    assert schema_messages == []
+    assert result["status"] == "pass"
+    assert result["contract_salvaged"] is True
+    assert "context_intake.must_read_refs must be a list, not str" in result["contract_salvage_findings"]
+    assert "deliverables.0.kind must use exact canonical value: figure" in result["contract_salvage_findings"]
+    assert "references.0.required_actions must be a list, not str" in result["contract_salvage_findings"]
+
+
+def test_suggest_contract_checks_schema_and_runtime_stay_in_lockstep_for_nested_proof_field_salvage() -> None:
+    contract = _proof_contract()
+    contract["claims"][0]["parameters"][0]["aliases"] = "r0"
+    contract["claims"][0]["hypotheses"][0]["symbols"] = "r_0"
+    contract["acceptance_tests"][0]["kind"] = "Proof_Parameter_Coverage"
+
+    payload = {"contract": contract}
+
+    schema_messages = _schema_error_messages(_suggest_contract_checks_input_schema(), payload)
+    result = _call_verification_tool("suggest_contract_checks", payload)
+
+    assert schema_messages == []
+    assert result["suggested_count"] > 0
+    assert result["contract_salvaged"] is True
+    assert "claims.0.parameters.0.aliases must be a list, not str" in result["contract_salvage_findings"]
+    assert "claims.0.hypotheses.0.symbols must be a list, not str" in result["contract_salvage_findings"]
+    assert "acceptance_tests.0.kind must use exact canonical value: proof_parameter_coverage" in result[
+        "contract_salvage_findings"
+    ]
+
+
 def test_run_contract_check_schema_rejects_explicit_empty_optional_contract_collections_when_metadata_is_missing() -> None:
     from jsonschema import Draft202012Validator
 
@@ -2042,26 +2116,31 @@ def test_run_contract_check_schema_rejects_explicit_empty_optional_contract_coll
 
 
 def test_run_contract_check_schema_surfaces_duplicate_contract_string_list_rejection() -> None:
-    from jsonschema import Draft202012Validator
-
-    schema = _run_contract_check_input_schema()
-    validator = Draft202012Validator(schema)
-
     request = {
         "request": {
             "check_key": "contract.limit_recovery",
             "contract": {
+                "schema_version": 1,
                 "scope": {"question": "What is the large-k limit?"},
-                "context_intake": {"must_read_refs": ["ref-main", "ref-main"]},
+                "context_intake": {"must_read_refs": ["ref-main", " ref-main "]},
                 "uncertainty_markers": {
                     "weakest_anchors": ["Benchmark still tentative"],
                     "disconfirming_observations": ["Limit fails against the published asymptote"],
                 },
             },
+            "metadata": {"regime_label": "large-k", "expected_behavior": "approaches benchmark asymptote"},
+            "observed": {"limit_passed": True, "observed_limit": "large-k"},
         }
     }
 
-    assert list(validator.iter_errors(request)) != []
+    messages = _schema_error_messages(_run_contract_check_input_schema(), request)
+    runtime_result = _call_verification_tool("run_contract_check", request)
+
+    assert messages
+    assert runtime_result == {
+        "error": "Invalid contract payload: context_intake.must_read_refs.1 is a duplicate",
+        "schema_version": 1,
+    }
 
 
 def test_run_contract_check_schema_requires_one_trimmed_identifier() -> None:

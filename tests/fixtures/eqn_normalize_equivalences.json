@@ -1,0 +1,97 @@
+{
+  "description": "Pairs of LaTeX equation bodies that MUST normalize to the same string per brief 002 §3.4.1 pipeline (a)-(e), plus a small block of pairs that MUST NOT normalize to the same string (documenting the multi-index symmetry skip, plan 002 §1 item 5 pick, and case-sensitivity stage (e)).",
+  "equivalent_pairs": [
+    {
+      "stage": "a",
+      "name": "spacing macros and ASCII whitespace collapse",
+      "left": "a \\, + \\; b",
+      "right": "a+b"
+    },
+    {
+      "stage": "a",
+      "name": "tilde spacer and unicode whitespace",
+      "left": "a~+  b",
+      "right": "a+b"
+    },
+    {
+      "stage": "b",
+      "name": "dfrac collapses to frac",
+      "left": "\\dfrac{a}{b}",
+      "right": "\\frac{a}{b}"
+    },
+    {
+      "stage": "b",
+      "name": "tfrac collapses to frac",
+      "left": "\\tfrac{a}{b}",
+      "right": "\\frac{a}{b}"
+    },
+    {
+      "stage": "b",
+      "name": "left/right stripped",
+      "left": "\\left( a + b \\right)",
+      "right": "(a+b)"
+    },
+    {
+      "stage": "b",
+      "name": "mathop rm lowers to mathrm",
+      "left": "\\mathop{\\rm tr}(X)",
+      "right": "\\mathrm{tr}(X)"
+    },
+    {
+      "stage": "c",
+      "name": "mathbf operator-like folds to mathrm",
+      "left": "\\mathbf{tr}(X)",
+      "right": "\\mathrm{tr}(X)"
+    },
+    {
+      "stage": "c",
+      "name": "mathit operator-like folds to mathrm",
+      "left": "\\mathit{det}(A)",
+      "right": "\\mathrm{det}(A)"
+    },
+    {
+      "stage": "c",
+      "name": "text operator-like folds to mathrm",
+      "left": "\\text{Pf}(M)",
+      "right": "\\mathrm{Pf}(M)"
+    },
+    {
+      "stage": "d",
+      "name": "bare a/b becomes \\frac{a}{b}",
+      "left": "a/b",
+      "right": "\\frac{a}{b}"
+    },
+    {
+      "stage": "d",
+      "name": "macro-bare / token canonicalizes",
+      "left": "\\pi/2",
+      "right": "\\frac{\\pi}{2}"
+    },
+    {
+      "stage": "a+b+d",
+      "name": "composed stages a,b,d",
+      "left": "\\dfrac{a \\, + \\; b}{c}",
+      "right": "\\frac{a+b}{c}"
+    }
+  ],
+  "non_equivalent_pairs": [
+    {
+      "stage": "skip:multi-index",
+      "name": "multi-index symmetry NOT canonicalized (plan §1 item 5 skip)",
+      "left": "X^{IJ}",
+      "right": "X^{JI}"
+    },
+    {
+      "stage": "e",
+      "name": "case is semantic: \\mathbf{X} (matrix) != X",
+      "left": "\\mathbf{X}",
+      "right": "X"
+    },
+    {
+      "stage": "e",
+      "name": "case is semantic: single-letter \\mathrm{A} preserved",
+      "left": "\\mathrm{A}",
+      "right": "A"
+    }
+  ]
+}

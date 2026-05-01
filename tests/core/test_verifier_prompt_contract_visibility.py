@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from gpd.adapters.install_utils import expand_at_includes
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "src/gpd/agents"
 TEMPLATES_DIR = REPO_ROOT / "src/gpd/specs/templates"
@@ -15,15 +17,32 @@ def _read_verification_template() -> str:
     return (TEMPLATES_DIR / "verification-report.md").read_text(encoding="utf-8")
 
 
+def _read_expanded_verifier_prompt() -> str:
+    return expand_at_includes(_read_verifier_prompt(), REPO_ROOT / "src/gpd", "/runtime/")
+
+
 def test_verifier_prompt_points_to_canonical_verification_schema_sources() -> None:
     verifier = _read_verifier_prompt()
+    expanded_verifier = _read_expanded_verifier_prompt()
     verifier_lines = verifier.splitlines()
 
+    assert "@{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md" in verifier_lines
     assert "`@{GPD_INSTALL_DIR}/templates/verification-report.md` is the canonical `VERIFICATION.md` frontmatter/body surface." in verifier
     assert "`@{GPD_INSTALL_DIR}/templates/contract-results-schema.md` is the canonical source of truth for `plan_contract_ref`, `contract_results`, `comparison_verdicts`, and verification-side `suggested_contract_checks`." in verifier
+    assert "## Data Boundary" not in verifier
+    assert "## Canonical LLM Error References" in verifier
+    assert "`@{GPD_INSTALL_DIR}/references/verification/errors/llm-physics-errors.md` -- index and entry point" in verifier
+    assert "`@{GPD_INSTALL_DIR}/references/verification/errors/llm-errors-traceability.md` -- compact detection matrix" in verifier
+    assert "Load only the split file(s) needed for the current physics context." in verifier
     assert "Do not invent a verifier-local schema, relax required ledgers, or treat body prose as a substitute for frontmatter consumed by validation and downstream tooling." in verifier
     assert "include a machine-readable `ASSERT_CONVENTION` comment immediately after the YAML frontmatter in `VERIFICATION.md`." in verifier
     assert "Changed phase verification artifacts now fail `gpd pre-commit-check` if the required header is missing or mismatched." in verifier
+    assert "Legacy frontmatter aliases are forbidden in model-facing output" in verifier
+    assert "## Data Boundary" in expanded_verifier
+    assert "ask the user before any install attempt" in expanded_verifier
+    assert "Prefer copy-pasteable GPD commands" in expanded_verifier
+    for legacy_alias in ("must_haves", "verification_inputs", "contract_evidence", "independently_confirmed"):
+        assert legacy_alias not in verifier
     assert "@{GPD_INSTALL_DIR}/templates/verification-report.md" in verifier_lines
     assert "@{GPD_INSTALL_DIR}/templates/contract-results-schema.md" in verifier_lines
 
@@ -49,25 +68,23 @@ def test_verifier_prompt_surfaces_validator_enforced_contract_ledger_rules() -> 
 def test_verifier_prompt_frontmatter_example_includes_contract_ledgers() -> None:
     verifier = _read_verifier_prompt()
 
-    assert "plan_contract_ref: GPD/phases/{phase_number}-{phase_name}/{phase_number}-{plan}-PLAN.md#/contract" in verifier
-    assert "contract_results:" in verifier
-    assert "uncertainty_markers:" in verifier
-    assert "comparison_verdicts:    # Required when a decisive comparison was required or attempted" in verifier
-    assert "subject_kind: claim|deliverable|acceptance_test|reference" in verifier
-    assert "subject_role: decisive|supporting|supplemental|other" in verifier
-    assert "comparison_kind: benchmark|prior_work|experiment|cross_method|baseline|other" in verifier
-    assert "weakest_anchors: [anchor-1]" in verifier
-    assert "disconfirming_observations: [observation-1]" in verifier
+    assert "plan_contract_ref" in verifier
+    assert "contract_results" in verifier
+    assert "comparison_verdicts" in verifier
+    assert "suggested_contract_checks" in verifier
+    assert "\nindependently_confirmed:" not in verifier
     assert "<!-- ASSERT_CONVENTION: natural_units=natural, metric_signature=mostly-minus, fourier_convention=physics -->" in verifier
-    assert "weakest_anchors: []" not in verifier
-    assert "disconfirming_observations: []" not in verifier
+    assert "filler placeholders" not in verifier
 
 
 def test_verifier_prompt_surfaces_missing_parameter_proof_audit_and_stale_review_gate() -> None:
     verifier = _read_verifier_prompt()
     contract_results_schema = (TEMPLATES_DIR / "contract-results-schema.md").read_text(encoding="utf-8")
+    research_verification = (TEMPLATES_DIR / "research-verification.md").read_text(encoding="utf-8")
     verification_template = _read_verification_template()
 
+    assert verifier.count("## Physics Stub Detection Patterns") == 1
+    assert verifier.count("## 5.15 Anomalies/Topological Properties — Executable Template") == 1
     assert "[] Proof structure" in verifier
     assert (
         "Every named theorem parameter or hypothesis is used or explicitly discharged; no theorem symbol may "
@@ -89,11 +106,18 @@ def test_verifier_prompt_surfaces_missing_parameter_proof_audit_and_stale_review
         "`proof_audit.audit_artifact_path` points to the canonical proof-redteam artifact"
     ) in verifier
     assert "A quantified proof-bearing claim must keep `proof_audit.quantifier_status` explicit" in contract_results_schema
+    assert "`claim_kind` is `theorem|lemma|corollary|proposition|claim`" in contract_results_schema
+    assert "`proof_artifact_path`, `proof_artifact_sha256`, `audit_artifact_path`, `audit_artifact_sha256`, `claim_statement_sha256`" in contract_results_schema
     assert "`proof_audit.proof_artifact_path` must match a declared `proof_deliverables` path" in contract_results_schema
     assert "`proof_audit.audit_artifact_path` must point to a proof-redteam artifact" in contract_results_schema
-
-    assert "Proof-backed claims are stricter still" in verification_template
-    assert "Quantified proof claims must keep `proof_audit.quantifier_status` explicit" in verification_template
-    assert "the declared proof artifact path and the canonical proof-redteam artifact path" in verification_template
-    assert "proof artifact, or proof-audit deliverable changed after the last adversarial proof review" in verification_template
-    assert "A stale proof audit is never compatible with `status: passed`." in verification_template
+    assert "every declared proof-specific acceptance test in `claims[].acceptance_tests[]` passing" in contract_results_schema
+    assert "Verification reports are the decisive readout of the same contract-backed ledger" in verification_template
+    assert "status: passed` is strict" in verification_template
+    assert "every required decisive comparison is decisive" in verification_template
+    assert "record structured `suggested_contract_checks` instead of padding prose" in verification_template
+    assert "Proof-backed claims follow the proof-audit rules in the canonical schema" in verification_template
+    assert "completed_actions: []" not in verification_template
+    assert "missing_actions: [read]" not in verification_template
+    assert 'summary: "[what the adversarial proof review concluded]"' in research_verification
+    assert "all artifacts pass levels 1-4" in verifier
+    assert "all artifacts pass levels 1-3" not in verifier

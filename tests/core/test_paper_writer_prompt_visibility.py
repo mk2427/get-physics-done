@@ -17,7 +17,8 @@ def test_paper_writer_prompt_keeps_contract_evidence_as_writing_block() -> None:
     assert "plan_contract_ref" in source
     assert "contract_results" in source
     assert "comparison_verdicts" in source
-    assert "evidence path" in source
+    assert "any decisive `comparison_verdicts` entry with an evidence path" not in source
+    assert "any decisive `comparison_verdicts` entry when the manuscript claim depends on that comparison" in source
     assert "the research is not paper-ready. Return WRITING BLOCKED." in source
 
 

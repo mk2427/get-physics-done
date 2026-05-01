@@ -4,6 +4,8 @@ This directory contains the automated test suite for GPD: core CLI and state reg
 
 The final section of this README keeps the full checked-in repository interdependency graph that the graph guardrail tests read directly.
 
+Default `uv run pytest tests/ -q` uses the fast daily suite declared in `tests/conftest.py` and already runs in parallel via `pyproject.toml`'s `-n auto` default. Use `uv run pytest tests/ -q --dist=loadscope` when you want the explicit `loadscope` scheduling used by CI. For a focused smoke pass, run `uv run pytest tests/test_runtime_abstraction_boundaries.py tests/core/test_contract_schema_prompt_parity.py tests/mcp/test_tool_contract_visibility.py tests/core/test_verifier_prompt_contract_visibility.py tests/core/test_verification_surface_alignment_regressions.py -q`. The GitHub Actions workflow runs the complementary heavy suite with `--full-suite` plus the shared ignore helper so heavyweight files are actually collected on their own.
+
 ## Repository Interdependency Graph
 
 <!-- repo-graph-generated-on:start -->
@@ -26,11 +28,11 @@ This graph therefore includes:
 
 <!-- repo-graph-scope:start -->
 
-- `src/gpd/commands/*.md`: `66`
-- `src/gpd/agents/*.md`: `24`
-- `src/gpd/specs/workflows/*.md`: `67`
-- `src/gpd/specs/templates/**/*.md`: `74`
-- `src/gpd/specs/references/**/*.md`: `163`
+- `src/gpd/commands/*.md`: `70`
+- `src/gpd/agents/*.md`: `33`
+- `src/gpd/specs/workflows/*.md`: `71`
+- `src/gpd/specs/templates/**/*.md`: `79`
+- `src/gpd/specs/references/**/*.md`: `185`
 - `src/gpd/adapters/*.py`: `9`
 - `src/gpd/hooks/*.py`: `11`
 - `src/gpd/mcp/servers/*.py`: `8`
@@ -203,7 +205,7 @@ flowchart TD
 
 - `.github/workflows/test.yml -> tests/**`
   `authority`
-  Runs `uv run pytest tests/ -q -n auto` across the whole test tree.
+  Runs fast and full pytest coverage explicitly in CI.
 
 - `.github/workflows/test.yml -> pyproject.toml`
   `authority`
@@ -471,7 +473,7 @@ flowchart TD
   Canonical parser for agent prompt definitions.
 
 <!-- repo-graph-same-stem-command-workflow:start -->
-- `src/gpd/commands/{add-phase,add-todo,arxiv-submission,audit-milestone,branch-hypothesis,check-todos,compact-state,compare-branches,compare-experiment,compare-results,complete-milestone,debug,decisions,derive-equation,dimensional-analysis,discover,discuss-phase,error-patterns,error-propagation,execute-phase,explain,export,export-logs,graph,help,insert-phase,limiting-cases,list-phase-assumptions,literature-review,map-research,merge-phases,new-milestone,new-project,numerical-convergence,parameter-sweep,pause-work,peer-review,plan-milestone-gaps,plan-phase,progress,quick,reapply-patches,record-insight,regression-check,remove-phase,research-phase,respond-to-referees,resume-work,revise-phase,sensitivity-analysis,set-profile,set-tier-models,settings,show-phase,slides,start,sync-state,tangent,tour,undo,update,validate-conventions,verify-work,write-paper}.md -> src/gpd/specs/workflows/{same stems}.md`
+- `src/gpd/commands/{add-phase,add-todo,adversarial-review,arxiv-submission,audit-milestone,branch-hypothesis,check-todos,compact-state,compare-branches,compare-experiment,compare-results,complete-milestone,compute-sympy,debug,decisions,derive-equation,digest-assertion,digest-knowledge,dimensional-analysis,discover,discuss-phase,error-patterns,error-propagation,execute-phase,explain,export,export-logs,graph,help,insert-phase,limiting-cases,list-phase-assumptions,literature-review,map-research,merge-phases,new-milestone,new-project,numerical-convergence,parameter-sweep,pause-work,peer-review,plan-milestone-gaps,plan-phase,progress,quick,reapply-patches,record-insight,regression-check,remove-phase,research-phase,respond-to-referees,resume-work,revise-phase,sensitivity-analysis,set-profile,set-tier-models,settings,show-phase,slides,start,sync-state,tangent,tour,undo,update,validate-conventions,verify-work,write-paper}.md -> src/gpd/specs/workflows/{same stems}.md`
 <!-- repo-graph-same-stem-command-workflow:end -->
   `include`
   Explicit same-stem command-to-workflow includes are node-level edges, not just an aggregate count.
@@ -495,6 +497,9 @@ flowchart TD
   `spawn`
 
 - `src/gpd/commands/debug.md -> src/gpd/agents/gpd-debugger.md`
+  `spawn`
+
+- `src/gpd/commands/compute-sympy.md -> src/gpd/agents/gpd-sympy-calculator.md`
   `spawn`
 
 - `src/gpd/commands/map-research.md -> src/gpd/agents/gpd-research-mapper.md`
@@ -616,13 +621,13 @@ flowchart TD
 - `src/gpd/agents/gpd-planner.md -> src/gpd/specs/templates/planner-subagent-prompt.md`
   `include`
 
-- `src/gpd/agents/{gpd-bibliographer,gpd-consistency-checker,gpd-debugger,gpd-executor,gpd-experiment-designer,gpd-literature-reviewer,gpd-notation-coordinator,gpd-paper-writer,gpd-phase-researcher,gpd-plan-checker,gpd-planner,gpd-project-researcher,gpd-referee,gpd-research-synthesizer,gpd-roadmapper,gpd-research-mapper,gpd-verifier}.md -> src/gpd/specs/references/shared/shared-protocols.md`
+- `src/gpd/agents/{gpd-adversarial-critic,gpd-assertion-digester,gpd-bibliographer,gpd-consistency-checker,gpd-debugger,gpd-executor,gpd-experiment-designer,gpd-finding-adjudicator,gpd-knowledge-critic,gpd-literature-reviewer,gpd-notation-coordinator,gpd-paper-digester,gpd-paper-writer,gpd-phase-researcher,gpd-plan-checker,gpd-planner,gpd-project-researcher,gpd-referee,gpd-research-synthesizer,gpd-roadmapper,gpd-research-mapper,gpd-sympy-calculator,gpd-verifier}.md -> src/gpd/specs/references/shared/shared-protocols.md`
   `include`
 
 - `src/gpd/agents/{gpd-review-reader,gpd-review-literature,gpd-review-math,gpd-check-proof,gpd-review-physics,gpd-review-significance}.md -> src/gpd/specs/references/shared/shared-protocols.md`
   `include`
 
-- `src/gpd/agents/{gpd-bibliographer,gpd-consistency-checker,gpd-debugger,gpd-executor,gpd-experiment-designer,gpd-explainer,gpd-literature-reviewer,gpd-notation-coordinator,gpd-paper-writer,gpd-phase-researcher,gpd-plan-checker,gpd-planner,gpd-project-researcher,gpd-referee,gpd-research-synthesizer,gpd-roadmapper,gpd-research-mapper}.md -> src/gpd/specs/references/orchestration/agent-infrastructure.md`
+- `src/gpd/agents/{gpd-adversarial-critic,gpd-assertion-digester,gpd-bibliographer,gpd-consistency-checker,gpd-debugger,gpd-executor,gpd-experiment-designer,gpd-explainer,gpd-finding-adjudicator,gpd-knowledge-critic,gpd-literature-reviewer,gpd-notation-coordinator,gpd-paper-digester,gpd-paper-writer,gpd-phase-researcher,gpd-plan-checker,gpd-planner,gpd-project-researcher,gpd-referee,gpd-research-synthesizer,gpd-roadmapper,gpd-research-mapper,gpd-sympy-calculator}.md -> src/gpd/specs/references/orchestration/agent-infrastructure.md`
   `include`
 
 - `src/gpd/agents/{gpd-review-reader,gpd-review-literature,gpd-check-proof,gpd-review-significance}.md -> src/gpd/specs/references/orchestration/agent-infrastructure.md`
@@ -1135,7 +1140,7 @@ They explicitly preserve:
 - `src/gpd/hooks/runtime_detect.py -> environment signals {CLAUDE_CODE_SESSION, CLAUDE_CODE, CODEX_SESSION, CODEX_CLI, GEMINI_CLI, OPENCODE_SESSION, CLAUDE_CONFIG_DIR, CODEX_CONFIG_DIR, GEMINI_CONFIG_DIR, OPENCODE_CONFIG_DIR, OPENCODE_CONFIG, XDG_CONFIG_HOME}`
   `candidate-set`
 
-- `src/gpd/hooks/runtime_detect.py -> active runtime precedence {activation env vars -> local runtime dirs -> global runtime dirs -> ALL_RUNTIMES tie-break}`
+- `src/gpd/hooks/runtime_detect.py -> active runtime precedence {activation env vars -> local runtime dirs -> global runtime dirs -> live runtime inventory tie-break}`
   `ordering-contract`
   Runtime detection is precedence-driven, not a flat unordered candidate family.
 
@@ -1149,7 +1154,7 @@ They explicitly preserve:
   `ordering-contract`
   Hook consumers inherit this precedence through `get_gpd_install_dirs(prefer_active=True)` and `get_update_cache_files()`.
 
-- `tests/hooks/test_runtime_detect.py -> src/gpd/hooks/runtime_detect.py::ALL_RUNTIMES`
+- `tests/hooks/test_runtime_detect.py -> src/gpd/hooks/runtime_detect.py::supported_runtime_names()`
   `ordering-contract`
 
 - `src/gpd/hooks/statusline.py -> <workspace>/GPD/state.json`
@@ -1624,7 +1629,7 @@ They explicitly preserve:
 - `tests/core/test_frontmatter.py + tests/core/test_frontmatter_edge.py + tests/core/test_properties.py -> src/gpd/core/frontmatter.py`
   `typed-roundtrip`
 
-- `tests/core/test_state.py + tests/core/test_state_stress.py + tests/core/test_state_coverage_gaps.py + tests/core/test_state_mutations.py + tests/core/test_state_storage.py -> src/gpd/core/state.py`
+- `tests/core/test_state.py + tests/core/test_state_stress.py + tests/core/test_state_mutations.py + tests/core/test_state_storage.py -> src/gpd/core/state.py`
   `typed-roundtrip`
   Markdown/json persistence, normalization, sync, backup, and tagged verification-record preservation are all exercised.
 

@@ -1,0 +1,243 @@
+{
+  "axes": [
+    {
+      "id": 1,
+      "name": "Trace normalization",
+      "regime": "All N, all T, all couplings. The convention is N-agnostic \u2014 its function is to make the planar-limit bookkeeping transparent.",
+      "BLOCKING": false
+    },
+    {
+      "id": 2,
+      "name": "Gauge group",
+      "regime": "All N \u2265 2. For MP (Laliberte-McPeak) model the choice is U(N) \u2014 different model, different axis.",
+      "BLOCKING": false
+    },
+    {
+      "id": 3,
+      "name": "BFSS Hamiltonian",
+      "regime": "All N \u2265 2, all couplings. `g = 1` choice is WLOG per Lin-Zheng Eq. 7; reintroduce `g` via dimensional restoration `[X] = E^{1/3}\u00b7g^{2/3}`, `[P] = E^{2/3}\u00b7g^{\u22122/3}` when comparing with SUGRA (Axis 6).",
+      "BLOCKING": false
+    },
+    {
+      "id": 4,
+      "name": "Dimensionless T\u0303",
+      "regime": "Applies at all T where 't Hooft limit is meaningful. The crossover T\u0303 \u2248 0.9 (Hagedorn/deconfinement) separates the \"BH\" regime (small T\u0303) from the \"gas of D0s\" regime (large T\u0303); conventions hold in both.",
+      "BLOCKING": false
+    },
+    {
+      "id": 5,
+      "name": "Fermion rep",
+      "regime": "All BFSS-family work (no T/N regime dependence). LM model uses complex \u03a8, \u03a8\u2020 \u2014 disjoint axis.",
+      "BLOCKING": false
+    },
+    {
+      "id": 6,
+      "name": "\u03b1'/coupling",
+      "regime": "For SUGRA comparison at low T\u0303 (gravity regime `T\u0303 \u2272 1`), \u03b1' corrections are organised as an expansion in `T\u0303^{2/5}` (via `a_1, a_2` of Pateloudis fit at T\u0303 = 0.4\u20131.0).",
+      "BLOCKING": false
+    },
+    {
+      "id": 7,
+      "name": "\u03b3^{10} hermiticity",
+      "regime": "Applies only in Euclidean-signature finite-T lattice MC and Wick-rotated bootstrap. Lorentzian real-time fermion kinetic term is `i \u03c8\u0304 \u03b3^0 \u2202_t \u03c8`; Wick rotation `t \u2192 \u2212i\u03c4` converts this to the Euclidean form above (depending on \u03b3^0 \u2194 \u03b3^{10} assignment).",
+      "BLOCKING": true
+    },
+    {
+      "id": 8,
+      "name": "Gauge generator",
+      "regime": "SU(N) physical states obey `C|phys\u27e9 = 0` (Gauss law) for all N \u2265 2, all T, all couplings. On physical states, the SUSY algebra closes as `{Q_\u03b1,Q_\u03b2} = 2 \u03b4_{\u03b1\u03b2} H` (the C-term drops).",
+      "BLOCKING": false
+    },
+    {
+      "id": 9,
+      "name": "Level assignment",
+      "regime": "Pure bookkeeping \u2014 applies at any N, T, coupling as long as SO(9)-invariant ground state is being bootstrapped. For finite-T bootstrap (Adams 2025 / conic program) the level assignment is the same but the positivity constraint becomes KMS-exponential-cone rather than SDP (Axis 1 of meta-audit \u00a73 row \"Adams conic \u2283 SDP\").",
+      "BLOCKING": false
+    },
+    {
+      "id": 10,
+      "name": "Polyakov loop",
+      "regime": "Gauge-theory thermal observable; not defined in Buividovich's ungauged model. Relevant for T\u0303 around the deconfinement crossover T\u0303_c \u2248 0.9 in BFSS (Pateloudis) and T_c \u2248 0.2\u20130.9 \u03bc in BMN (Bergner, depending on \u03bc).",
+      "BLOCKING": false
+    },
+    {
+      "id": 11,
+      "name": "BMN \u03bc",
+      "regime": "BMN (mass-deformed BFSS) only; irrelevant for pure BFSS. Gravity-dual applicable for \u03bc \u2273 0.1 (non-perturbative regime of full-BMN); bosonic-BMN (fermions removed) gives a different T_c (see \u00a7E.0.8 and meta-audit O5).",
+      "BLOCKING": false
+    },
+    {
+      "id": 12,
+      "name": "Lattice stencil",
+      "regime": "Lattice MC only. Continuum limit `a \u2192 0` recovers the canonical Euclidean action (Axis 3, Axis 15). The Wilson stencil breaks SUSY at finite `a`; Ward-identity violations scale as `O(a\u00b2)` (improved action) and extrapolate to 0 in the continuum fit.",
+      "BLOCKING": false
+    },
+    {
+      "id": 13,
+      "name": "Metric signature",
+      "regime": "Lorentzian for bootstrap at T = 0 (ground state), operator-dimension comparisons, and Lin TASI pedagogical derivations. Euclidean for finite-T lattice MC (Pateloudis, Bergner), finite-T conic bootstrap (Adams 2025), and finite-T SUGRA (BM black-hole thermodynamics).",
+      "BLOCKING": false
+    },
+    {
+      "id": 14,
+      "name": "SO(9) 16\u229716",
+      "regime": "Pure group theory \u2014 convention-independent. Dictates the bootstrap variable enumeration at every level; e.g. at Lin-Zheng `\u2113 = 3` one needs `\u27e8tr (\u03c8\u03c8)\u27e9` in all five irreps.",
+      "BLOCKING": false
+    },
+    {
+      "id": 15,
+      "name": "Euclidean prefactor",
+      "regime": "Euclidean lattice MC and thermal path-integral. For Lorentzian bootstrap use Axis 3 Hamiltonian form; translate via Wick rotation `S_E = \u2212i S_L` at `t = \u2212i\u03c4`.",
+      "BLOCKING": false
+    },
+    {
+      "id": 16,
+      "name": "Op. dimension",
+      "regime": "Near-horizon D0-brane SUGRA (Type IIA black zero-brane). Conformal dimension \u0394 translates to thermal two-point function scaling `\u27e8O(\u03c4) O(0)\u27e9 \u223c \u03c4^{-2\u0394}`. `R_AdS = 2/5`, `d = 14/5`, `\u03b7 = 9/5` are Lin-TASI `d = R_AdS \u00b7 ...` exponents (Lin TASI `references/2508.20970.md:606\u2013607`). Full five-tower needed for `b \u2260 0` irreps (non-BPS scalars, vectors, antisymm tensors).",
+      "BLOCKING": false
+    }
+  ],
+  "typos_confirmed": [
+    {
+      "T_id": "T-001",
+      "description": "Lin 2020 bracelet prefactor `1/k \u2192 1/(2k)`",
+      "status_raw": "CONFIRMED (adjudicated)",
+      "status": "CONFIRMED"
+    },
+    {
+      "T_id": "T-002",
+      "description": "Lin 2020 free-energy factor-16",
+      "status_raw": "CONFIRMED (adjudicated)",
+      "status": "CONFIRMED"
+    },
+    {
+      "T_id": "T-003",
+      "description": "Lin 2020 orthogonal polynomial degree `d\u22121 \u2192 d\u22122`",
+      "status_raw": "CONFIRMED (cluster)",
+      "status": "CONFIRMED"
+    },
+    {
+      "T_id": "T-004",
+      "description": "Adams 2025 Nystr\u00f6m Laplacian diagonal",
+      "status_raw": "CONFIRMED (adjudicated)",
+      "status": "CONFIRMED"
+    },
+    {
+      "T_id": "T-006",
+      "description": "KKN 1998 `\\yofm` internal factor-4",
+      "status_raw": "CONFIRMED (adjudicated)",
+      "status": "CONFIRMED"
+    },
+    {
+      "T_id": "T-009",
+      "description": "Laliberte-McPeak `V(x)` cubic power",
+      "status_raw": "CONFIRMED (cluster)",
+      "status": "CONFIRMED"
+    },
+    {
+      "T_id": "T-010",
+      "description": "Laliberte-McPeak variable-count intermediate",
+      "status_raw": "CONFIRMED (cluster, heuristic)",
+      "status": "CONFIRMED"
+    },
+    {
+      "T_id": "T-013",
+      "description": "Lin TASI Eq. 44 sign on `(d\u22121)`",
+      "status_raw": "CONFIRMED (adjudicated)",
+      "status": "CONFIRMED"
+    },
+    {
+      "T_id": "T-015",
+      "description": "Pateloudis BMN `X_i\u00b3 \u2192 X_i\u00b2`",
+      "status_raw": "CONFIRMED (adjudicated)",
+      "status": "CONFIRMED"
+    },
+    {
+      "T_id": "T-016",
+      "description": "Bergner 2021 Wilson-stencil stray minus",
+      "status_raw": "CONFIRMED (adjudicated)",
+      "status": "CONFIRMED"
+    }
+  ],
+  "typos_inconclusive": [
+    {
+      "T_id": "T-005",
+      "description": "KZ Eq. 5.8 `h_c \u2248 \u22120.04966` reproducibility",
+      "status_raw": "INCONCLUSIVE",
+      "status": "INCONCLUSIVE"
+    },
+    {
+      "T_id": "T-014",
+      "description": "Lin TASI `probefield` factor-4",
+      "status_raw": "INCONCLUSIVE (low severity)",
+      "status": "INCONCLUSIVE"
+    }
+  ],
+  "typos_not_typo": [
+    {
+      "T_id": "T-007",
+      "description": "KZ Eq. 5.9 LHS `h\u00b7t_2 = \u03bd`",
+      "status": "NOT-TYPO"
+    },
+    {
+      "T_id": "T-008",
+      "description": "KZ Eq. 5.7 `K(m",
+      "status": "NOT-TYPO"
+    },
+    {
+      "T_id": "T-011",
+      "description": "Laliberte-McPeak `G = i[X,P] \u2212 {\u03a8,\u03a8\u2020} + 2N\u00b7I` coefficient `+2N\u00b7I`",
+      "status": "NOT-TYPO"
+    },
+    {
+      "T_id": "T-012",
+      "description": "Biggs-Maldacena Eq. `WKBasy` `d/(2\u03c0T",
+      "status": "NOT-TYPO"
+    },
+    {
+      "T_id": "T-017",
+      "description": "Pateloudis Gauss constraint commutator-of-Grassmann convention",
+      "status": "NOT-TYPO"
+    },
+    {
+      "T_id": "T-018",
+      "description": "Pateloudis/Bergner \"U(N",
+      "status": "NOT-TYPO"
+    },
+    {
+      "T_id": "T-019",
+      "description": "BFSS 1996 `\\p = p_+` harvmac macro, `(R/2",
+      "status": "NOT-TYPO"
+    },
+    {
+      "T_id": "T-020",
+      "description": "BFSS 1996 Lagrangian sign `\u2212(1/2",
+      "status": "NOT-TYPO"
+    },
+    {
+      "T_id": "T-021",
+      "description": "Lin 2023 `Tr[X,P] = iN\u00b2` vs strict-SU(N",
+      "status": "NOT-TYPO"
+    },
+    {
+      "T_id": "T-022",
+      "description": "Lin 2023 Eq. 21 `bigEconstr`",
+      "status": "NOT-TYPO"
+    },
+    {
+      "T_id": "T-023",
+      "description": "Lin-Zheng 2024 shift normalisation `Tr \u03c8_\u03b1 \u03c8_\u03b1 = 8N\u00b2`",
+      "status": "NOT-TYPO"
+    },
+    {
+      "T_id": "T-024",
+      "description": "Laliberte-McPeak `g_c\u00b2 = 1/(6\u221a3",
+      "status": "NOT-TYPO"
+    },
+    {
+      "T_id": "T-025",
+      "description": "Lin TASI \"Type IIA action is *not* invariant\" wording",
+      "status": "NOT-TYPO"
+    }
+  ]
+}

@@ -10,6 +10,7 @@ from unittest.mock import patch
 import pytest
 
 from gpd.core.public_surface_contract import local_cli_bridge_commands
+from gpd.mcp.builtin_servers import GPD_MCP_SERVER_KEYS
 
 
 def test_write_settings_errors_reference_the_directory(tmp_path: Path) -> None:
@@ -123,6 +124,8 @@ def test_write_mcp_servers_opencode_fails_closed_for_non_dict_mcp_key(tmp_path: 
 @pytest.mark.parametrize(
     ("module_name", "helper_name"),
     [
+        ("gpd.adapters.codex", "_build_managed_optional_mcp_servers"),
+        ("gpd.adapters.claude_code", "_build_managed_optional_mcp_servers"),
         ("gpd.adapters.gemini", "_project_managed_mcp_servers"),
         ("gpd.adapters.opencode", "_project_managed_mcp_servers"),
     ],
@@ -147,6 +150,44 @@ def test_managed_wolfram_projection_helpers_hide_api_key_and_preserve_endpoint(
     assert "super-secret-token" not in payload
     assert "GPD_WOLFRAM_MCP_API_KEY" not in payload
     assert "https://example.invalid/api/mcp" in payload
+
+
+@pytest.mark.parametrize(
+    ("module_name", "helper_name", "expected_keys"),
+    [
+        (
+            "gpd.adapters.codex",
+            "_managed_optional_mcp_server_keys",
+            frozenset({"gpd-wolfram"}),
+        ),
+        (
+            "gpd.adapters.claude_code",
+            "_managed_mcp_server_keys",
+            frozenset({*GPD_MCP_SERVER_KEYS, "gpd-wolfram"}),
+        ),
+        (
+            "gpd.adapters.gemini",
+            "_managed_mcp_server_keys",
+            frozenset({*GPD_MCP_SERVER_KEYS, "gpd-wolfram"}),
+        ),
+        (
+            "gpd.adapters.opencode",
+            "_managed_mcp_server_keys",
+            frozenset({*GPD_MCP_SERVER_KEYS, "gpd-wolfram"}),
+        ),
+    ],
+)
+def test_managed_mcp_key_helpers_include_registry_backed_optional_keys(
+    module_name: str,
+    helper_name: str,
+    expected_keys: frozenset[str],
+) -> None:
+    module = importlib.import_module(module_name)
+    helper = getattr(module, helper_name)
+
+    keys = helper()
+
+    assert keys == expected_keys
 
 
 @pytest.mark.parametrize(

@@ -50,14 +50,14 @@ For most research targets that means actual computation. For proof-bearing or `p
 Load phase operation context:
 
 ```bash
-INIT=$(gpd init phase-op "${PHASE_ARG}")
+INIT=$(gpd --raw init phase-op "${PHASE_ARG}")
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
   # STOP — display the error to the user and do not proceed.
 fi
 ```
 
-Extract from init JSON: `phase_found`, `phase_dir`, `phase_number`, `phase_name`, `has_plans`, `plan_count`.
+Extract from init JSON: `phase_found`, `phase_dir`, `phase_number`, `phase_name`, `has_plans`, `plan_count`, `project_contract`, `project_contract_validation`, `project_contract_load_info`, `project_contract_gate`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`, `selected_protocol_bundle_ids`, `protocol_bundle_context`, `phase_proof_review_status`, `derived_manuscript_proof_review_status`.
 
 **If `phase_found` is false:**
 
@@ -81,6 +81,9 @@ Extract **phase goal** from ROADMAP.md (the research outcome to verify, not task
 
 **Verification independence:** Load only what the verifier needs to judge results on their own merits. See @{GPD_INSTALL_DIR}/references/verification/meta/verification-independence.md.
 
+If `derived_manuscript_proof_review_status` is present, use it as the structured freshness summary for any manuscript-local proof-bearing artifact and keep the corresponding `*-PROOF-REDTEAM.md` artifact authoritative for pass/fail decisions.
+If `project_contract_gate.visible` is true, keep `project_contract`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`, `selected_protocol_bundle_ids`, and `protocol_bundle_context` in the verifier context even when `project_contract_gate.authoritative` is false. They remain visible carry-forward context, not authoritative scope, until the gate clears.
+
 **INCLUDE in verification context:**
 
 - Phase goal from ROADMAP.md
@@ -88,6 +91,7 @@ Extract **phase goal** from ROADMAP.md (the research outcome to verify, not task
 - Artifact file paths (the actual research outputs to inspect)
 - GPD/STATE.md (project conventions, active approximations, unit system)
 - GPD/config.json (project configuration)
+- Visible contract/reference carry-forward context from init JSON when `project_contract_gate.visible` is true
 
 **EXCLUDE from verification context:**
 
@@ -552,6 +556,38 @@ Format each as: Check Name -> What to verify -> Expected result -> Why cannot ve
 
 **Score:** `verified_contract_targets / total_contract_targets`
 If you need an aggregate independently confirmed tally for the narrative, keep it in body prose or tables. Do not add a non-canonical verification frontmatter key for that count.
+</step>
+
+<step name="blast_radius_on_gaps">
+**Trigger 1 — reactive blast-radius scan on gaps_found.**
+
+When `determine_status` returns `gaps_found`, call `result_downstream(state, result_id)` for
+each gap's `result_id` **before** proceeding to `generate_fix_plans`.  Collect the scan output
+and append it to the phase VERIFICATION.md as a `## Blast Radius` section using the format below.
+This makes the invalidation surface visible to the researcher immediately upon gap detection.
+
+```python
+# Pseudo-code executed by the verify-phase orchestrator:
+for gap in gaps:
+    result_id = gap.get("result_id")
+    if result_id:
+        blast = result_downstream(state, result_id)
+        # blast == {"result_id": <str>, "transitive_dependents": [<id>, ...]}
+        # Append to VERIFICATION.md § Blast Radius (see format below)
+```
+
+**Format — append to VERIFICATION.md:**
+
+```markdown
+## Blast Radius
+
+| Result ID | Transitive Dependent Count | Transitive Dependent IDs |
+|-----------|---------------------------|--------------------------|
+| R-001     | 3                         | R-002, R-004, R-007      |
+| R-005     | 0                         | (none)                   |
+```
+
+If no gaps have an associated `result_id`, skip the section silently.
 </step>
 
 <step name="generate_fix_plans">

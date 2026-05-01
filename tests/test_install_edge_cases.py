@@ -871,7 +871,8 @@ class TestRegistryInvalidYaml:
         f.write_text("---\n \n---\nBody text.", encoding="utf-8")
         agent = _parse_agent_file(f, source="agents")
         assert agent.name == "empty-yaml"  # Falls back to stem
-        assert agent.system_prompt == "Body text."
+        assert agent.system_prompt.startswith("## Agent Requirements\n")
+        assert agent.system_prompt.endswith("Body text.")
 
 
 # =========================================================================

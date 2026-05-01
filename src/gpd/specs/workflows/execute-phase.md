@@ -18,7 +18,7 @@ For artifact class definitions and review priority rules, see `@{GPD_INSTALL_DIR
 Load all context in one call:
 
 ```bash
-INIT=$(gpd init execute-phase "${PHASE_ARG}")
+INIT=$(gpd --raw init execute-phase "${PHASE_ARG}")
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
   exit 1
@@ -1519,7 +1519,12 @@ task(
   subagent_type="gpd-verifier",
   model="{verifier_model}",
   readonly=false,
-  prompt="First, read {GPD_AGENTS_DIR}/gpd-verifier.md for your role and instructions.
+ prompt="First, read {GPD_AGENTS_DIR}/gpd-verifier.md for your role and instructions.
+
+Reload these canonical verifier surfaces before updating any verdicts:
+- {GPD_INSTALL_DIR}/workflows/verify-phase.md
+- {GPD_INSTALL_DIR}/templates/verification-report.md
+- {GPD_INSTALL_DIR}/templates/contract-results-schema.md
 
 Re-verify Phase {PHASE_NUMBER} after gap closure.
 
@@ -1533,6 +1538,8 @@ Re-verify Phase {PHASE_NUMBER} after gap closure.
 	- State: GPD/STATE.md
 	- Roadmap: GPD/ROADMAP.md
 	</files_to_read>
+
+	Rebuild the structured phase context with `gpd --raw init phase-op {PHASE_NUMBER}` and keep `project_contract`, `project_contract_gate`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`, `selected_protocol_bundle_ids`, `protocol_bundle_context`, and `phase_proof_review_status` visible while re-checking the remaining gaps.
 
 	Focus on the gaps that were previously marked failed, partial, blocked, or otherwise unresolved in the previous verification. If the prior report carries `session_status: diagnosed`, use the recorded root causes and missing actions as the starting point for re-verification. For proof-bearing work, re-check every required `*-PROOF-REDTEAM.md` artifact and keep the phase blocked until those audits report `status: passed`.
 	Check whether the gap closure plans have resolved each issue.

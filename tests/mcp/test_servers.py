@@ -1225,12 +1225,14 @@ class TestSkillsServer:
         assert result["skills"][0]["name"] == "gpd-execute-phase"
 
     def test_list_skills_empty_category(self):
+        from gpd import registry as content_registry
         from gpd.mcp.servers.skills_server import list_skills
 
         result = list_skills(category="nonexistent")
-        assert result["count"] == 0
-        assert result["skills"] == []
-        assert "categories" in result
+        assert result == {
+            "error": f"category must be one of: {', '.join(content_registry.skill_categories())}",
+            "schema_version": 1,
+        }
 
     def test_get_skill_found(self):
         from gpd.mcp.servers.skills_server import get_skill
@@ -1284,8 +1286,9 @@ class TestSkillsServer:
         assert "Review Ledger Schema" in schema_documents["review-ledger-schema.md"]["body"]
         assert "referee-decision-schema.md" in schema_documents
         assert "Referee Decision Schema" in schema_documents["referee-decision-schema.md"]["body"]
-        assert "review-ledger-schema.md" in contract_documents
-        assert "schema_documents and contract_documents already include" in result["loading_hint"]
+        assert "review-ledger-schema.md" not in contract_documents
+        assert "schema_documents mirror loaded schema markdown bodies" in result["loading_hint"]
+        assert "contract_documents mirror the remaining contract markdown bodies" in result["loading_hint"]
         assert result["content_authority"] == "canonical"
         assert result["structured_metadata_authority"] == {
             "content": "canonical",
@@ -1300,6 +1303,7 @@ class TestSkillsServer:
         assert result["project_reentry_capable"] is False
         assert result["review_contract"] is not None
         assert result["review_contract"]["review_mode"] == "publication"
+        assert "required_state" not in result["review_contract"]
         assert result["review_contract"]["conditional_requirements"] == [
             {
                 "when": "theorem-bearing claims are present",
@@ -1315,7 +1319,6 @@ class TestSkillsServer:
         assert "review-contract:" not in result["content"]
         assert all(not entry["path"].startswith("/") for entry in result["schema_documents"])
         assert all(not entry["path"].startswith("/") for entry in result["contract_documents"])
-
 
     def test_get_skill_resume_work_surfaces_project_reentry_metadata(self):
         from gpd.mcp.servers.skills_server import get_skill
@@ -1361,8 +1364,16 @@ class TestSkillsServer:
         agent = registry.get_agent("gpd-debugger")
         # Agent-backed entries remain part of the canonical MCP skill index.
         assert result["name"] == "gpd-debugger"
+        assert result["content"] == agent.system_prompt
         assert "Primary debugger agent" in result["content"]
-        assert "## Agent Policy" in result["content"]
+        assert "## Agent Requirements" in result["content"]
+        assert result["content"].count("## Agent Requirements") == 1
+        assert "## Agent Policy" not in result["content"]
+        assert result["structured_metadata_authority"] == {
+            "content": "canonical",
+            "allowed_tools": "mirrored",
+            "agent_policy": "mirrored",
+        }
         assert "commit_authority" in result["content"]
         assert "artifact_write_authority" in result["content"]
         assert "shared_state_authority" in result["content"]
@@ -1374,6 +1385,20 @@ class TestSkillsServer:
             "shared_state_authority": agent.shared_state_authority,
             "tools": agent.tools,
         }
+
+    def test_get_skill_loading_hint_only_claims_schema_documents_when_loaded(self):
+        from gpd.mcp.servers.skills_server import get_skill
+
+        result = get_skill("gpd-slides")
+
+        assert "error" not in result
+        assert result["reference_count"] > 0
+        assert result["schema_documents"] == []
+        assert result["contract_documents"] == []
+        assert "See `referenced_files` for external markdown dependencies." in result["loading_hint"]
+        assert "schema_documents and contract_documents mirror loaded schema and contract markdown bodies." not in result[
+            "loading_hint"
+        ]
 
     def test_get_skill_canonicalizes_runtime_command_examples(self):
         from gpd.mcp.servers.skills_server import get_skill

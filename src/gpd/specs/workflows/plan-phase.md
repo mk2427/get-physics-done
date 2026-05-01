@@ -19,7 +19,7 @@ Read these files using the file_read tool:
 Load all context in one call (include file contents to avoid redundant reads):
 
 ```bash
-INIT=$(gpd init plan-phase "$PHASE" --include state,roadmap,requirements,context,research,verification,validation)
+INIT=$(gpd --raw init plan-phase "$PHASE" --include state,roadmap,requirements,context,research,verification,validation)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
   exit 1
@@ -39,7 +39,7 @@ Parse JSON for: `researcher_model`, `planner_model`, `checker_model`, `research_
 - `research_mode=explore`: Always run research step even if research exists. Expand research and comparison coverage, but do not auto-create git-backed branches or branch-like plans just because alternatives appear.
 - `research_mode=exploit`: Reuse existing research only when it already covers the exact method family, anchors, and decisive evidence path for this phase. Otherwise run targeted research. Suppress optional tangents unless the user explicitly asks for them.
 - `research_mode=adaptive`: Start broad until prior decisive evidence or an explicit approach lock justifies narrowing. Do not infer “safe to narrow” from phase number alone.
-- Tangent policy: when multiple viable approaches or optional side questions appear, do NOT silently branch or widen the plan. Surface the 4-way tangent decision model instead: (1) branch as an alternative hypothesis via `gpd:tangent` or `gpd:branch-hypothesis`, (2) run a bounded side investigation now via `gpd:quick`, (3) capture and defer via `gpd:add-todo`, or (4) stay on the main line and plan only the selected primary approach. `git.branching_strategy` does not override this rule.
+- Tangent policy: when multiple viable approaches or optional side questions appear, do NOT silently branch or widen the plan. Use the canonical tangent decision model below instead of assuming extra plans or branches. `git.branching_strategy` does not override this rule.
 - All modes still require contract completeness, decisive outputs, required anchors, forbidden-proxy handling, and disconfirming paths before execution starts.
 
 **Set shell variables from init JSON:**
@@ -97,11 +97,7 @@ When `--inline-discuss` is present, combine discuss-phase and plan-phase into a 
    - "What formalism/method do you envision for this phase?" (if multiple valid approaches exist)
    - "Are there any constraints or conventions from prior phases that should carry through?" (if phase has dependencies)
    - "What precision level is acceptable?" (for numerical/computational phases)
-3. If those questions reveal multiple viable approaches or optional side questions, stop and present the tangent decision model explicitly instead of assuming extra plans or branches:
-   - `Branch as alternative hypothesis` -> route through `gpd:tangent` or `gpd:branch-hypothesis`
-   - `Run a bounded side investigation now` -> route through `gpd:quick`
-   - `Capture and defer` -> route through `gpd:add-todo`
-   - `Stay on the main line` -> continue planning around the chosen primary approach only
+3. If those questions reveal multiple viable approaches or optional side questions, use the canonical tangent decision model below instead of assuming extra plans or branches.
 4. Record any explicit tangent decision in the lightweight CONTEXT.md so downstream agents see whether the user chose to stay on the main line, branch, quick-check, or defer.
 5. Record responses as a lightweight CONTEXT.md in the phase directory (same format as discuss-phase output, but with only the critical decisions — skip the full Socratic dialogue)
 6. Proceed to step 5 with the context populated
@@ -204,7 +200,7 @@ If the check fails, warn the user before spawning the researcher or planner. Con
 
 ## 4.6. Tangent Control During Planning
 
-When planning reveals multiple viable approaches or optional side questions, treat them as tangent candidates rather than silently branching the plan.
+When planning reveals multiple viable approaches or optional side questions, treat them as tangent candidates rather than silently branching the plan. Use the canonical tangent decision model above.
 
 **Required 4-way tangent decision model:**
 
@@ -560,7 +556,7 @@ Planner prompt:
 **Research mode:** {RESEARCH_MODE}
 **Autonomy:** {AUTONOMY}
 
-Planning requires an approved project contract. If `{project_contract}` is empty, stale, or too underspecified to identify the phase contract slice, return `## CHECKPOINT REACHED` instead of writing or revising plans from inferred scope.
+Planning requires the approved `project_contract`; if it is empty, stale, or too underspecified to identify the phase contract slice, return `## CHECKPOINT REACHED`.
 
 **Project State:** {state_content}
 **Project Contract:** {project_contract}
@@ -574,16 +570,15 @@ Planning requires an approved project contract. If `{project_contract}` is empty
 
 ## Canonical PLAN Contract Schema
 
-Use `templates/plan-contract-schema.md` as the canonical contract schema reference.
+Use the shared planner template, phase template, and `templates/plan-contract-schema.md`; this wrapper only adds phase-specific gates.
 
 **Validator gate before planning:**
-- `contract.context_intake` is required and must be a non-empty object. Do not start planning until the contract carries the required carry-forward inputs from the schema.
-- For ordinary execution plans, the contract surface must include `scope`, `contract.context_intake`, `claims`, `deliverables`, `acceptance_tests`, `forbidden_proxies`, and `uncertainty_markers`; include `references` only when explicit grounding is not already carried elsewhere in the contract.
-- Non-scoping plans keep `claims[]`, `deliverables[]`, `acceptance_tests[]`, and `forbidden_proxies[]` non-empty. Include `references[]` only when the plan relies on external grounding that is not already explicit in `contract.context_intake` or preserved scoping inputs. Do not downgrade these to prose or placeholder text.
-- Treat `approach_policy` as execution policy only; it does not satisfy grounding on its own.
-- If the phase is proof-bearing, the plan must expose the theorem inventory directly in the contract and task/verification surface: set `claims[].claim_kind`, enumerate `claims[].parameters[]`, `claims[].hypotheses[]`, `claims[].quantifiers[]`, `claims[].conclusion_clauses[]`, and `claims[].proof_deliverables[]`, and include proof-specific `acceptance_tests[].kind` values such as `proof_hypothesis_coverage`, `proof_parameter_coverage`, `proof_quantifier_domain`, `claim_to_proof_alignment`, `lemma_dependency_closure`, or `counterexample_search`. Do not hide proof obligations inside narrative prose.
-- Light mode changes the body only. Keep the full canonical frontmatter, including `wave`, `depends_on`, `files_modified`, `interactive`, `conventions`, and `contract`.
-- If the contract is scoping-only, preserve at least one target, open question, or carry-forward input instead of emitting a hollow scaffold.
+- If `project_contract` is empty, stale, or too underspecified to identify the phase contract slice, return `## CHECKPOINT REACHED`.
+- Keep `Contract Intake` and `Effective Reference Intake` visible to the planner.
+- For proof-bearing work, preserve theorem inventory, proof-specific acceptance tests, and the `{plan_id}-PROOF-REDTEAM.md` handoff.
+- Light mode changes the body only; keep the full canonical frontmatter from the phase template.
+- Validate each finished plan with `gpd validate plan-contract <PLAN.md>` before checker review.
+- If `tool_requirements` are declared, validate them with `gpd validate plan-preflight <PLAN.md>` before treating the plan as execution-ready.
 
 **Phase Context:**
 IMPORTANT: If context exists below, it contains USER DECISIONS from gpd:discuss-phase.
@@ -600,49 +595,21 @@ IMPORTANT: If context exists below, it contains USER DECISIONS from gpd:discuss-
 
 **Tangent Control:**
 - When multiple viable approaches or optional side questions appear, do NOT silently branch, emit branch-like alternative plans, or widen scope.
-- Use this 4-way decision model:
-  1. `Branch as alternative hypothesis` -> route through `gpd:tangent` or `gpd:branch-hypothesis`
-  2. `Run a bounded side investigation now` -> route through `gpd:quick`
-  3. `Capture and defer` -> route through `gpd:add-todo`
-  4. `Stay on the main line` -> plan only the selected primary approach
+- Use the canonical 4-way decision model above.
 - If no explicit tangent decision already exists in context and more than one viable path remains live, return `## CHECKPOINT REACHED` with the four options above instead of silently branching.
 - If `research_mode=exploit`, suppress optional tangents unless the user explicitly requested them or the current approach is blocked by physics, contract, or anchor failure. Do not surface `gpd:branch-hypothesis` as a default exploit-mode move.
 </planning_context>
 
 <physics_planning_requirements>
-Each plan MUST include:
-
-- **Mathematical rigor checkpoints:** Points where derivations must be verified for dimensional consistency, symmetry preservation, and correct tensor structure
-- **Limiting case validation:** Explicit checks that results reduce correctly in all known limits (classical, non-relativistic, weak-coupling, thermodynamic, etc.)
-- **Order-of-magnitude estimates:** Before any detailed calculation, estimate the expected scale of the answer
-- **Error budget:** For numerical work, specify target precision and identify dominant error sources
-- **Consistency checks:** Cross-checks between independent methods or approaches where possible
-- **Proof-obligation audit path:** Any theorem-style or `proof_obligation` result must name the proof artifact, the sibling `{plan_id}-PROOF-REDTEAM.md` audit artifact, and the blocking condition that keeps execution/verification closed until the audit passes
-- **Tangent discipline:** Independent alternatives and optional side questions require an explicit tangent decision before they become separate workstreams
-- **Anchor discipline:** If a benchmark, paper, dataset, or prior artifact is contract-critical, surface it in the plan instead of treating it as optional background
-- **Contract completeness:** Every plan must include claims, deliverables, acceptance tests, forbidden proxies, and uncertainty markers in frontmatter, plus `references[]` whenever explicit grounding is not already carried elsewhere in the contract
-- **Protocol bundle coverage:** If protocol bundles are selected, carry their estimator policies, decisive artifact guidance, and verifier extensions into the plan explicitly
+Keep mathematical rigor, limiting cases, error budgets, and proof-redteam gating explicit; the shared schema owns the detailed contract vocabulary.
 </physics_planning_requirements>
 
 <contract_requirements>
-Planning requires `project_contract`:
-
-- If `project_contract` is empty, stale, or too underspecified to identify the phase contract slice, return `## CHECKPOINT REACHED` instead of writing a weak or guessed plan.
-- Every PLAN.md must include a `contract` frontmatter block with exact IDs for claims, deliverables, acceptance tests, and forbidden proxies. Include `references[]` only when the plan needs explicit grounding that is not already carried through `contract.context_intake` or preserved scoping inputs; do not count `approach_policy` as grounding.
-- Every PLAN.md must carry forward required context from the contract: must-read refs, prior outputs, baselines, and user anchors when execution depends on them. That context lives under `contract.context_intake`, not as a separate top-level block.
-- Every PLAN.md must include uncertainty markers from the contract when they constrain interpretation or verification.
-- Every PLAN.md should express result wiring through `contract.links` or explicit task/verification handoffs, not through a second ad hoc success schema.
-- For proof-bearing plans, use the dedicated theorem fields directly in `claims[]` entries rather than prose stand-ins: `claim_kind`, `parameters`, `hypotheses`, `quantifiers`, `conclusion_clauses`, and `proof_deliverables` must stay explicit where proof review depends on them.
-- For proof-bearing plans, reserve at least one proof-specific `acceptance_tests[].kind` (`proof_hypothesis_coverage`, `proof_parameter_coverage`, `proof_quantifier_domain`, `claim_to_proof_alignment`, `lemma_dependency_closure`, or `counterexample_search`) plus a blocking review task that produces `{plan_id}-PROOF-REDTEAM.md` and rejects any proof that silently drops a named parameter, hypothesis, quantifier, or conclusion clause.
-- Validate each finished plan with `gpd validate plan-contract <PLAN.md>` before treating it as approved.
-- When a plan declares `tool_requirements`, validate executable specialized-tool readiness with `gpd validate plan-preflight <PLAN.md>` before treating it as execution-ready.
-- Autonomy mode and model profile may change cadence or detail, but they do NOT relax contract completeness.
+Use the approved `project_contract`; do not infer scope from roadmap or requirements alone.
 </contract_requirements>
 
 <light_mode_instructions>
-**If plan depth is `light`:** Keep the full canonical frontmatter, including `wave`, `depends_on`, `files_modified`, `interactive`, `conventions`, and `contract`.
-
-Simplify only the body: one high-level task block per plan, concise verification, concise success criteria. The light plan is a shorter execution script, not a strategic outline that drops required contract fields.
+Light mode changes the body only; keep the canonical frontmatter from the phase template.
 </light_mode_instructions>
 
 <context_budget_guidance>
@@ -675,19 +642,14 @@ Output consumed by gpd:execute-phase. Plans need:
 
 - [ ] PLAN.md files created in phase directory
 - [ ] Each plan has valid frontmatter
-- [ ] Each plan has a complete contract block (claims, deliverables, acceptance tests, forbidden proxies, uncertainty markers, and `references[]` whenever grounding is not already explicit elsewhere in the contract)
+- [ ] Each plan satisfies `templates/plan-contract-schema.md`
 - [ ] Each plan passes `gpd validate plan-contract <PLAN.md>`
 - [ ] Each plan with `tool_requirements` passes `gpd validate plan-preflight <PLAN.md>` or surfaces an explicit blocker/fallback path
-- [ ] Tasks are specific and actionable with clear mathematical deliverables
-- [ ] Dependencies correctly identified (including prerequisite derivations)
-- [ ] Waves assigned for parallel execution
-- [ ] Contract links or explicit task-level dependency wiring cover the decisive handoffs and limiting-case recovery path
-- [ ] Required refs, prior outputs, and baselines are surfaced in `<context>` or verification paths
-- [ ] Selected protocol bundles are reflected in verification paths or decisive artifact choices where relevant
-- [ ] Forbidden proxies are rejected explicitly in `<done>` or `<success_criteria>`
-- [ ] Dimensional analysis check specified for each quantitative result
-- [ ] Validation checkpoints placed after each major derivation step
-- [ ] Every proof-bearing plan names a theorem/proof target, exposes named parameters and hypotheses, and reserves `{plan_id}-PROOF-REDTEAM.md` as a mandatory fail-closed artifact
+- [ ] Tasks stay specific, actionable, and mode-appropriate
+- [ ] Dependencies, refs, baselines, and protocol bundles are surfaced where the shared templates expect them
+- [ ] Forbidden proxies are rejected explicitly
+- [ ] Quantitative results include dimensional checks and validation checkpoints where relevant
+- [ ] Proof-bearing plans reserve `{plan_id}-PROOF-REDTEAM.md` and keep theorem coverage visible
 </quality_gate>
 ```
 
@@ -849,7 +811,6 @@ Revision prompt:
 <revision_context>
 **Phase:** {phase_number}
 **Mode:** revision
-
 **Existing plans:** {plans_content}
 **Checker issues:** {structured_issues_from_checker}
 **Protocol Bundles:** {protocol_bundle_context}
@@ -859,29 +820,15 @@ Revision prompt:
 **Project Contract:** {project_contract}
 **Reference Artifacts:** {reference_artifacts_content}
 
-## Canonical PLAN Contract Schema
-
-Use `templates/plan-contract-schema.md` as the canonical contract schema reference.
-
-**Phase Context:**
-Revisions MUST still honor user decisions.
+Use the shared planner template, phase template, and `templates/plan-contract-schema.md`; apply only targeted fixes for the checker issues.
 {context_content}
 </revision_context>
 
 <instructions>
 Make targeted updates to address checker issues.
-Do NOT replan from scratch unless issues are fundamental (e.g., wrong physical regime, missing conservation law, incorrect symmetry).
-If the approved project contract is missing or no longer sufficient to identify the right phase slice, return `## CHECKPOINT REACHED` instead of patching plans against guessed scope.
-Pay special attention to:
-- Dimensional consistency fixes
-- Missing limiting case checks
-- Approximation validity bounds
-- Missing decisive outputs or deliverables
-- Missing acceptance tests, anchor refs, or forbidden-proxy handling
-- Missing proof-obligation audit steps, theorem inventories, or `{plan_id}-PROOF-REDTEAM.md` handoff artifacts
-- Missing parameter / hypothesis / quantifier coverage that would let a proof silently collapse to a special case
-- Missing protocol-bundle-driven estimator guards, decisive artifacts, or verifier extensions
-- Missing disconfirming paths
+Do NOT replan from scratch unless issues are fundamental (wrong physical regime, missing conservation law, incorrect symmetry, or an invalid contract slice).
+If the approved project contract is missing or no longer sufficient to identify the right phase slice, return `## CHECKPOINT REACHED`.
+Keep proof-bearing coverage, `tool_requirements`, decisive outputs, anchor refs, forbidden-proxy handling, and disconfirming paths visible where the checker can see them.
 Return what changed.
 </instructions>
 ```

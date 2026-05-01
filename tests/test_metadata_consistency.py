@@ -428,3 +428,22 @@ def test_bibliography_template_tracks_live_references_bib_path() -> None:
 
     assert "references/references.bib" in template
     assert "GPD/references.bib" not in template
+
+
+def test_bfss_lesson_files_are_discoverable_under_references_lessons() -> None:
+    """Brief 002 §11 L1..L21: 21 lesson files at src/gpd/specs/references/lessons/."""
+    lessons_dir = _repo_root() / "src" / "gpd" / "specs" / "references" / "lessons"
+    assert lessons_dir.is_dir(), f"missing {lessons_dir}"
+    files = list(lessons_dir.glob("bfss-lesson-L*.md"))
+    names = {f.name for f in files}
+    expected = {f"bfss-lesson-L{n}.md" for n in range(1, 22)}
+    missing = expected - names
+    extra = names - expected
+    assert not missing and not extra, f"missing={sorted(missing)} extra={sorted(extra)}"
+    # Each file must have a non-empty YAML frontmatter with lesson_id.
+    for path in files:
+        head = path.read_text(encoding="utf-8")
+        assert head.startswith("---\n"), f"{path.name} missing frontmatter"
+        # The lesson_id line must match the file name suffix (bfss-lesson-L{N}.md).
+        expected_id = f"lesson_id: L{path.stem.split('-L')[-1]}"
+        assert expected_id in head.splitlines()[:6], f"{path.name} frontmatter lacks {expected_id!r}"

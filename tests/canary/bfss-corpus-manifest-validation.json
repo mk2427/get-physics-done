@@ -1,0 +1,16 @@
+{
+  "corpus": "BFSS Bootstrap Phase-1 (16 papers) (1-paper validation)",
+  "generated_at": "2026-04-21",
+  "references_dir": "D:/Data/Dropbox/PSI/projects/bfss-bootstrap/references",
+  "entries": [
+    {
+      "pdf_filename": "2203.11360.pdf",
+      "sha256": "f9b3e94f40ef2a811f7243e7c25b6a60bb33dc563b9e1e6dc9ac2fc233d8d26f",
+      "arxiv_id": "2203.11360",
+      "retrieved_at": "2026-04-21",
+      "tex_filename": "sources/2203.11360.tex",
+      "tex_sha256": "6f2786c53a29cb588a4edc03ec5fc425e2652e20a7f7c894b439e8d3e29330c7",
+      "source_format": "tex"
+    }
+  ]
+}

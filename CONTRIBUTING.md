@@ -81,6 +81,15 @@ Cross-runtime release checks:
 - Keep user-facing validation docs aligned with the CLI surface in `gpd validate`, especially `consistency`, `project-contract`, `review-preflight`, `paper-quality`, `referee-decision`, and `reproducibility-manifest`.
 - Do not commit secrets, private infrastructure details, internal strategy notes, or cached research outputs.
 
+### Experimental Branches
+
+Some features are developed on PSI-internal experimental branches before upstream contribution. The branch `experimental/knowledge-trust-full` is one such surface. If you are working on this branch:
+
+- All code is fork-only per the PSI fork posture (brief 002 §3.6).
+- Do not cherry-pick or PR experimental commits to `psi-oss` upstream without CLA clearance and maintainer agreement.
+- The `docs/experimental/` directory contains frozen plan artifacts and design briefs for auditability.
+- Run `py -m pytest -m 'not canary'` to skip corpus-dependent tests that require the local BFSS reference PDFs.
+
 ## Pull Request Checklist
 
 - `main` is protected: direct pushes are blocked, and pull requests must pass the required `tests` workflow before merge.
