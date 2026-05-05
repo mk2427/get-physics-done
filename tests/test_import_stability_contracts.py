@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import ast
+import sys
 import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-REPO_PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
+REPO_PYTHON = REPO_ROOT / ".venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
 
 
 def _repo_python_command() -> list[str]:

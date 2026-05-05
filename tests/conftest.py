@@ -86,7 +86,8 @@ def complementary_heavy_suite_ignore_args(*, tests_root: Path | None = None) -> 
 
     root = Path("tests") if tests_root is None else tests_root
     test_paths = sorted(path.relative_to(root).as_posix() for path in root.rglob("test_*.py"))
-    return tuple(f"--ignore={root / rel_path}" for rel_path in test_paths if rel_path not in FAST_SUITE_EXCLUDES)
+    root_prefix = root.as_posix().rstrip("/")
+    return tuple(f"--ignore={root_prefix}/{rel_path}" for rel_path in test_paths if rel_path not in FAST_SUITE_EXCLUDES)
 
 
 def _requested_collection_roots(config) -> tuple[Path, ...]:

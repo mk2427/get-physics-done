@@ -16,7 +16,7 @@ Following the ``run_parallel_critics`` precedent in
 orchestrator-side: ``dispatch_sympy_calculator`` raises
 ``NotImplementedError`` by default, and tests / production wrappers
 monkey-patch the symbol with either a canned payload (tests) or the
-Claude Code Task-tool invocation (workflow-step runner). Per plan 005
+runtime task-tool invocation (workflow-step runner). Per plan 005
 §Q5, dispatch failures are caught and surface as
 ``verdict="unevaluated"`` rather than propagating — the pre-oracle is a
 speedup, not a gate.
@@ -108,6 +108,14 @@ _EQUATION_PATTERN_KN_LEGACY_DISPLAY = re.compile(
     re.DOTALL,
 )
 
+# Canary K-002 form: bold-parenthesized label, ``**(K.N)**``, followed
+# by a display math block. Keep this before the inline ``(K.N)`` form
+# during extraction so inline prose math cannot steal the display body.
+_EQUATION_PATTERN_KN_BOLD_PAREN_DISPLAY = re.compile(
+    r"(?:^|\n)[ \t]*\*\*\((K\.\d+)\)\*\*[^\n]*\n+[ \t]*\$\$(.*?)\$\$",
+    re.DOTALL,
+)
+
 # Display-math kdoc form: ``(K.N)`` parenthesized label, with same-line
 # prose (label, TeX-name, section reference, ending in ``:``), followed
 # by a ``$$...$$`` display-math block on a subsequent line. Used by
@@ -136,7 +144,7 @@ _EQUATION_PATTERN_KN_DISPLAY = re.compile(
 def extract_equations_from_kdoc(kdoc_path: Path) -> list[tuple[str, str]]:
     """Return list of ``(equation_id, latex_body)`` from a kdoc's equations.
 
-    Matches four forms, de-duplicated by ``equation_id`` (first
+    Matches five forms, de-duplicated by ``equation_id`` (first
     occurrence wins):
 
     * **Canonical template form** per `knowledge.md:66-76`:
@@ -146,6 +154,8 @@ def extract_equations_from_kdoc(kdoc_path: Path) -> list[tuple[str, str]]:
       parenthesized label with the equation body in a separate
       display-math block. Multi-line prose between the label and the
       ``$$`` block is allowed.
+    * **Bold-parenthesized display form** for K-002:
+      ``**(K.1)** prose\n$$equation$$``.
     * **Compatibility alias** for EQN-REF and pre-004c fixtures:
       ``**E.1** prose: $equation$`` (bold-ID prose form).
     * **Legacy kdoc form** for pre-template kdocs (e.g., K-001 BFSS):
@@ -168,6 +178,7 @@ def extract_equations_from_kdoc(kdoc_path: Path) -> list[tuple[str, str]]:
     matches: list[tuple[str, str]] = []
     seen_ids: set[str] = set()
     for pattern in (
+        _EQUATION_PATTERN_KN_BOLD_PAREN_DISPLAY,
         _EQUATION_PATTERN_KN_DISPLAY,
         _EQUATION_PATTERN_KN,
         _EQUATION_PATTERN_EN,
@@ -191,7 +202,7 @@ def dispatch_sympy_calculator(
 ) -> dict:
     """Dispatch ``gpd-sympy-calculator``; returns the agent's output_schema dict.
 
-    Orchestrator-owned: Claude Code's Task tool invokes this function's
+    Orchestrator-owned: the active runtime's task tool invokes this function's
     payload against the agent spec at
     ``src/gpd/agents/gpd-sympy-calculator.md``. The expected return
     shape is::

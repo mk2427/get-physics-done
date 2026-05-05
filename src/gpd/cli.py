@@ -329,7 +329,7 @@ def _format_display_path_from_cwd(target: str | Path | None, *, cwd: Path) -> st
         relative = resolved_target.relative_to(resolved_cwd)
     except ValueError:
         if resolved_target.anchor and resolved_target.anchor == resolved_cwd.anchor:
-            relative_text = os.path.relpath(resolved_target, resolved_cwd)
+            relative_text = Path(os.path.relpath(resolved_target, resolved_cwd)).as_posix()
             return "." if relative_text in ("", ".") else relative_text
         return _format_display_path(resolved_target)
 
@@ -5651,26 +5651,22 @@ def _enclosing_project_root_for_json_input(input_path: str) -> Path | None:
     target = Path(input_path)
     if not target.is_absolute():
         resolved = (cwd / target).resolve(strict=False)
-        for base in (resolved.parent, *resolved.parent.parents):
-            if (base / "GPD").is_dir():
-                return base
-        return None
+        return resolve_project_root(resolved.parent, require_layout=True)
 
     resolved = target.expanduser().resolve(strict=False)
     immediate_parent = resolved.parent
-    if (immediate_parent / "GPD").is_dir():
-        return immediate_parent
+    immediate_project_root = resolve_project_root(immediate_parent, require_layout=True)
+    if immediate_project_root == immediate_parent:
+        return immediate_project_root
 
-    for base in immediate_parent.parents:
-        gpd_dir = (base / "GPD").resolve(strict=False)
-        if not gpd_dir.is_dir():
-            continue
-        try:
-            resolved.relative_to(gpd_dir)
-        except ValueError:
-            continue
-        return base
-    return None
+    resolved_project_root = resolve_project_root(immediate_parent, require_layout=True)
+    if resolved_project_root is None:
+        return None
+    try:
+        resolved.relative_to(resolved_project_root / "GPD")
+    except ValueError:
+        return None
+    return resolved_project_root
 
 
 def _resolve_existing_input_path(input_path: str | None, *, candidates: tuple[str, ...], label: str) -> Path:

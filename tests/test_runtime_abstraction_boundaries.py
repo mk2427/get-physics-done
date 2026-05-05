@@ -93,7 +93,7 @@ def _runtime_native_command_prefix_patterns() -> list[str]:
         {
             re.escape(descriptor.command_prefix)
             for descriptor in _RUNTIME_DESCRIPTORS
-            if descriptor.command_prefix in {"/gpd:", "$gpd-"}
+            if descriptor.command_prefix == "$gpd-"
         }
     )
 

@@ -26,8 +26,9 @@ Invocation:
   agent in step (a) to produce the Draft, then re-spawns it as Fixer on
   each round of the `/gpd:adversarial-review` loop.
 
-Model tier: same tier as gpd-paper-digester (ModelTier.TIER_2 / balanced
-default via AGENT_DEFAULT_TIERS in config.py).
+Model tier: profile-calibrated in src/gpd/core/config.py alongside
+gpd-paper-digester. The review/default path uses tier-1 because this
+agent is the Fixer-side partner in load-bearing assertion loops.
 
 This agent is NOT directly user-facing (surface: internal); users invoke
 `/gpd:digest-assertion` and the orchestrator routes to the digester.
@@ -70,6 +71,13 @@ Determine which assertion path applies from the caller's argument:
 * **Mixed input** (both E-entries and K-labels, no `equation_id`): derived-consequence path; the K-labels provide intermediate steps and the E-entries provide the terminal equation.
 
 ### Step 2 — assign assertion ID
+
+If the orchestrator supplies `assertion_id` or `reserved_assertion_id`, use that
+numeric top-level A-NNN. Do not scan `GPD/assertions/` for the next ID in this
+canary-mode path. You may append a 2-4 word kebab-case slug, but the numeric
+prefix is fixed by the orchestrator. If a canary dispatch root or manifest path
+is also supplied, write the assertion under that canary output root and return
+the actual path in `gpd_return.files_written`.
 
 Scan `GPD/assertions/` for pre-existing assertion docs:
 

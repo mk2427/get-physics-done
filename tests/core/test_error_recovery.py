@@ -752,6 +752,8 @@ class TestSafeParseFunctions:
 
     def test_safe_read_file_permission_error(self, tmp_path: Path) -> None:
         """Reading a file with permission error returns None."""
+        if os.name == "nt":
+            pytest.skip("Windows chmod read-only bits do not deny reads for the file owner")
         f = tmp_path / "noperm.txt"
         f.write_text("content")
         f.chmod(0o000)

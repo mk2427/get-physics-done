@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-import shlex
 import shutil
 from collections.abc import Mapping
 from pathlib import Path
@@ -23,6 +22,7 @@ from gpd.adapters.install_utils import (
     HOOK_SCRIPTS,
     MANIFEST_NAME,
     _is_hook_command_for_script,
+    _quote_command_token,
     build_hook_command,
     compile_markdown_for_runtime,
     convert_tool_references_in_body,
@@ -1253,7 +1253,7 @@ class GeminiAdapter(RuntimeAdapter):
         policy_path.parent.mkdir(parents=True, exist_ok=True)
         policy_path.write_text(_render_gemini_policy_toml(bridge_command), encoding="utf-8")
         self._managed_runtime_files = [
-            str(policy_path.relative_to(target_dir)),
+            policy_path.relative_to(target_dir).as_posix(),
         ]
 
         policy_dir_setting = str(policy_path.parent.resolve())
@@ -1300,7 +1300,7 @@ class GeminiAdapter(RuntimeAdapter):
                 )
                 next_step = (
                     "Exit the current Gemini session and relaunch with "
-                    f"{shlex.quote(str(wrapper_path))} so the runtime itself starts in yolo mode."
+                    f"{_quote_command_token(str(wrapper_path))} so the runtime itself starts in yolo mode."
                 )
             else:
                 message = (
@@ -1314,7 +1314,7 @@ class GeminiAdapter(RuntimeAdapter):
             "config_aligned": wrapper_exists if desired_mode == "yolo" else True,
             "requires_relaunch": wrapper_exists if desired_mode == "yolo" else False,
             "managed_by_gpd": wrapper_exists,
-            "launch_command": shlex.quote(str(wrapper_path)) if wrapper_exists else None,
+            "launch_command": str(wrapper_path) if wrapper_exists else None,
             "message": message,
             "next_step": next_step,
         }
@@ -1526,7 +1526,7 @@ class GeminiAdapter(RuntimeAdapter):
         if has_authoritative_manifest:
             policy_files = _normalize_string_list(managed_runtime_files)
             if not policy_files:
-                policy_files = [str(_managed_gemini_policy_path(target_dir).relative_to(target_dir))]
+                policy_files = [_managed_gemini_policy_path(target_dir).relative_to(target_dir).as_posix()]
             for rel_path in policy_files:
                 candidate = target_dir / rel_path
                 if candidate.exists():

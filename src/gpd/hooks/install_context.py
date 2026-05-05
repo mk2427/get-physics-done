@@ -94,16 +94,16 @@ def should_prefer_self_owned_install(
         return False
     if active_install_target is not None and self_install.config_dir == active_install_target.config_dir:
         return True
+    if active_install_target is None:
+        return True
+    if workspace_path is None or getattr(active_install_target, "install_scope", None) != "local":
+        return True
     if (
         self_install.runtime is not None
         and active_runtime is not None
         and self_install.runtime != active_runtime
     ):
         return False
-    if active_install_target is None:
-        return True
-    if workspace_path is None or getattr(active_install_target, "install_scope", None) != "local":
-        return True
     return False
 
 

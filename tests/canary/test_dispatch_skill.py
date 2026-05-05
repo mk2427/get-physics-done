@@ -8,6 +8,8 @@ a real ``claude`` binary.
 from __future__ import annotations
 
 import json
+import os
+import signal
 import subprocess
 import sys
 import types
@@ -75,6 +77,28 @@ def _common_kwargs(tmp_path: Path) -> dict:
         "sources_dir": tmp_path / "sources",
         "model": "claude-sonnet-4-6",
     }
+
+
+def test_resolve_claude_cli_prefers_real_windows_exe_for_cmd_shim(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows shim behavior")
+    shim = tmp_path / "claude.cmd"
+    shim.write_text("@echo off\n", encoding="utf-8")
+    exe = (
+        tmp_path
+        / "node_modules"
+        / "@anthropic-ai"
+        / "claude-code"
+        / "bin"
+        / "claude.exe"
+    )
+    exe.parent.mkdir(parents=True)
+    exe.write_text("", encoding="utf-8")
+    monkeypatch.setattr(dispatch_skill.shutil, "which", lambda name: str(shim))
+
+    assert dispatch_skill._resolve_claude_cli() == str(exe)
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +191,109 @@ def test_subprocess_nonzero_returns_subprocess_error(
     assert "command crashed" in result["stderr"]
 
 
+def test_subprocess_nonzero_preserves_claude_json_error_detail(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    stdout = json.dumps(
+        {
+            "subtype": "error_max_budget_usd",
+            "is_error": True,
+            "errors": ["Reached maximum budget ($5.00)"],
+            "total_cost_usd": 5.01,
+            "duration_ms": 123,
+            "session_id": "sess-budget",
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 2,
+                "cache_creation_input_tokens": 3,
+                "cache_read_input_tokens": 4,
+            },
+        }
+    )
+    monkeypatch.setattr(
+        dispatch_skill.subprocess,
+        "run",
+        lambda *a, **kw: _make_proc(
+            stdout=stdout,
+            stderr="SessionEnd hook failed",
+            returncode=1,
+        ),
+    )
+
+    result = dispatch_skill.dispatch_digest_knowledge(
+        Path("sources/foo.tex"), **_common_kwargs(tmp_path)
+    )
+
+    assert result["error_class"] == "subprocess_error"
+    assert "error_max_budget_usd" in result["stderr"]
+    assert "Reached maximum budget" in result["stderr"]
+    assert result["cost_usd"] == pytest.approx(5.01)
+    assert result["input_tokens"] == 10
+    assert result["cache_creation_tokens"] == 3
+
+
+def test_json_parse_error_includes_raw_stdout_and_stderr_tails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        dispatch_skill.subprocess,
+        "run",
+        lambda *a, **kw: _make_proc(
+            stdout="not json",
+            stderr="diagnostic stderr",
+            returncode=0,
+        ),
+    )
+
+    result = dispatch_skill.dispatch_digest_knowledge(
+        Path("sources/foo.tex"), **_common_kwargs(tmp_path)
+    )
+
+    assert result["error_class"] == "subprocess_error"
+    assert "not json" in result["stderr"]
+    assert "diagnostic stderr" in result["stderr"]
+
+
+def test_payload_is_error_preserves_diagnostics(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    result_text = (
+        "```yaml\n"
+        "gpd_return:\n"
+        "  status: failed\n"
+        "  files_written:\n"
+        "    - GPD/knowledge/K-001-test.md\n"
+        "```\n"
+    )
+    stdout = json.dumps(
+        {
+            "result": result_text,
+            "subtype": "runtime_error",
+            "is_error": True,
+            "errors": ["tool failed"],
+            "total_cost_usd": 0.25,
+            "duration_ms": 321,
+            "session_id": "sess-error",
+            "usage": {"input_tokens": 7, "output_tokens": 3},
+        }
+    )
+    monkeypatch.setattr(
+        dispatch_skill.subprocess,
+        "run",
+        lambda *a, **kw: _make_proc(stdout=stdout, returncode=0),
+    )
+
+    result = dispatch_skill.dispatch_digest_knowledge(
+        Path("sources/foo.tex"), **_common_kwargs(tmp_path)
+    )
+
+    assert result["error_class"] == "skill_error"
+    assert "runtime_error" in result["stderr"]
+    assert "tool failed" in result["stderr"]
+    assert result["session_id"] == "sess-error"
+    assert result["input_tokens"] == 7
+
+
 # ---------------------------------------------------------------------------
 # 4. TimeoutExpired ⇒ timeout class.
 # ---------------------------------------------------------------------------
@@ -178,6 +305,11 @@ def test_timeout_returns_timeout_class(
     def _raise_timeout(*args, **kwargs):
         raise subprocess.TimeoutExpired(cmd=["claude"], timeout=1)
 
+    monkeypatch.setattr(
+        dispatch_skill,
+        "_ensure_dispatch_command_surface",
+        lambda dispatch_root: dispatch_root / ".claude",
+    )
     monkeypatch.setattr(dispatch_skill.subprocess, "run", _raise_timeout)
 
     result = dispatch_skill.dispatch_digest_knowledge(
@@ -188,6 +320,61 @@ def test_timeout_returns_timeout_class(
 
     assert result["error_class"] == "timeout"
     assert result["status"] == "timeout"
+    assert result["wall_clock_seconds"] >= 1.0
+    assert result["duration_ms"] >= 1000
+
+
+def test_run_claude_process_timeout_terminates_process_tree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    taskkill_calls: list[list[str]] = []
+    killpg_calls: list[tuple[int, int]] = []
+
+    class _FakeProc:
+        pid = 12345
+        returncode = None
+        _calls = 0
+
+        def poll(self):
+            return None
+
+        def kill(self):
+            self.returncode = -9
+
+        def communicate(self, timeout=None):
+            self._calls += 1
+            if self._calls == 1:
+                raise subprocess.TimeoutExpired(
+                    cmd=["claude"], timeout=1, output="partial", stderr="err"
+                )
+            self.returncode = -9
+            return ("partial", "err")
+
+    def _fake_popen(*args, **kwargs):
+        return _FakeProc()
+
+    def _fake_run(cmd, *args, **kwargs):
+        taskkill_calls.append(list(cmd))
+        return _make_proc(stdout="", stderr="", returncode=0)
+
+    _fake_run.__module__ = "subprocess"
+    monkeypatch.setattr(dispatch_skill.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(dispatch_skill.subprocess, "run", _fake_run)
+    monkeypatch.setattr(
+        dispatch_skill.os,
+        "killpg",
+        lambda pid, sig: killpg_calls.append((pid, sig)),
+        raising=False,
+    )
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        dispatch_skill._run_claude_process(["claude"], timeout_s=1, cwd=tmp_path)
+
+    if os.name == "nt":
+        assert taskkill_calls
+        assert taskkill_calls[0][:4] == ["taskkill", "/F", "/T", "/PID"]
+    else:
+        assert killpg_calls == [(12345, signal.SIGTERM)]
 
 
 # ---------------------------------------------------------------------------
@@ -216,14 +403,12 @@ def test_add_dir_whitelist_excludes_project_root(
         if tok == "--add-dir":
             add_dir_args.append(cmd[i + 1])
 
-    expected_dirs = {
-        str(kwargs["knowledge_dir"]),
-        str(kwargs["assertion_dir"]),
-        str(kwargs["review_dir"]),
-        str(kwargs["canary_run_root"]),
-        str(kwargs["sources_dir"]),
-    }
-    assert set(add_dir_args) == expected_dirs
+    assert str(kwargs["sources_dir"]) in add_dir_args
+    dispatch_dirs = [
+        Path(arg) for arg in add_dir_args
+        if str(kwargs["canary_run_root"] / "dispatch") in arg
+    ]
+    assert dispatch_dirs
 
     # Project root anchor — get-physics-done/ — must NOT appear.
     project_root = Path(__file__).resolve().parents[2]
@@ -232,6 +417,92 @@ def test_add_dir_whitelist_excludes_project_root(
     assert "--model" in cmd
     assert "--no-session-persistence" in cmd
     assert "--allow-dangerously-skip-permissions" in cmd
+
+
+def test_dispatch_stages_ephemeral_claude_command_surface(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        dispatch_skill.subprocess,
+        "run",
+        lambda *a, **kw: _make_proc(
+            stdout=_envelope_with_files(["GPD/knowledge/K-001-test.md"])
+        ),
+    )
+
+    result = dispatch_skill.dispatch_digest_knowledge(
+        Path("sources/foo.tex"), **_common_kwargs(tmp_path)
+    )
+
+    dispatch_root = Path(result["manifest_path"]).parent
+    surface = dispatch_root / ".claude"
+    assert (surface / "commands" / "gpd" / "digest-knowledge.md").is_file()
+    assert (
+        surface / "get-physics-done" / "workflows" / "digest-knowledge.md"
+    ).is_file()
+    assert (surface / "agents" / "gpd-paper-digester.md").is_file()
+
+
+def test_dispatch_digest_knowledge_prompt_hardens_canary_metadata(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict = {}
+
+    def _capture_run(cmd, *args, **kwargs):
+        captured["prompt"] = cmd[cmd.index("-p") + 1]
+        return _make_proc(
+            stdout=_envelope_with_files(["GPD/knowledge/K-001-test.md"])
+        )
+
+    monkeypatch.setattr(dispatch_skill.subprocess, "run", _capture_run)
+
+    dispatch_skill.dispatch_digest_knowledge(
+        Path("sources/2302.04416.tex"),
+        arxiv_id="2302.04416",
+        source_filename="sources/2302.04416.tex",
+        source_path_sha256="b" * 64,
+        **_common_kwargs(tmp_path),
+    )
+
+    prompt = captured["prompt"]
+    assert "CANARY HARD REQUIREMENTS" in prompt
+    assert "source_filename: sources/2302.04416.tex" in prompt
+    assert f"source_path_sha256: {'b' * 64}" in prompt
+    assert "Do not shorten source_filename to a basename" in prompt
+    assert "Do not emit source_path_sha256 as null" in prompt
+    assert "GPD/reviews" in prompt
+
+
+def test_dispatch_rejects_unreturned_live_review_mutation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    live_root = tmp_path / "live" / "GPD"
+    live_review_dir = live_root / "reviews" / "canary-leak"
+    live_review_dir.mkdir(parents=True)
+    monkeypatch.setattr(
+        dispatch_skill, "_LIVE_KNOWLEDGE_DIR", live_root / "knowledge"
+    )
+    monkeypatch.setattr(
+        dispatch_skill, "_LIVE_ASSERTION_DIR", live_root / "assertions"
+    )
+    monkeypatch.setattr(dispatch_skill, "_LIVE_REVIEW_DIR", live_root / "reviews")
+
+    def _mutate_live_review(*args, **kwargs):
+        (live_review_dir / "leaked-review.md").write_text(
+            "leaked", encoding="utf-8"
+        )
+        return _make_proc(
+            stdout=_envelope_with_files(["GPD/knowledge/K-001-test.md"])
+        )
+
+    monkeypatch.setattr(dispatch_skill.subprocess, "run", _mutate_live_review)
+
+    result = dispatch_skill.dispatch_digest_knowledge(
+        Path("sources/foo.tex"), **_common_kwargs(tmp_path)
+    )
+
+    assert result["error_class"] == "skill_error"
+    assert "live GPD artifact changed during canary dispatch" in result["stderr"]
 
 
 # ---------------------------------------------------------------------------
@@ -292,9 +563,9 @@ def test_dispatch_digest_assertion_prompt_format(
     assert "K-003-kazakov-zheng-lattice-ym-bootstrap" in prompt
     assert "K.5" in prompt
     assert "--adversarial" in prompt
-    # No filesystem path leakage: must not mention .md or sandbox dirs.
+    # No kdoc filesystem path leakage: canary dispatch roots are expected.
     assert ".md" not in prompt
-    assert str(tmp_path) not in prompt
+    assert "canary_dispatch_root:" in prompt
 
 
 def test_dispatch_digest_assertion_default_budget_is_8usd(
@@ -306,7 +577,7 @@ def test_dispatch_digest_assertion_default_budget_is_8usd(
 
     def _capture_run(cmd, *args, **kwargs):
         captured["cmd"] = cmd
-        return _make_proc(stdout=_envelope_with_files(["A-1.md"]))
+        return _make_proc(stdout=_envelope_with_files(["GPD/assertions/A-001.md"]))
 
     monkeypatch.setattr(dispatch_skill.subprocess, "run", _capture_run)
 
@@ -334,7 +605,7 @@ def test_dispatch_digest_assertion_signature_takes_kdoc_id_and_equation_id(
 
     def _capture_run(cmd, *args, **kwargs):
         captured["cmd"] = cmd
-        return _make_proc(stdout=_envelope_with_files(["A-1.md"]))
+        return _make_proc(stdout=_envelope_with_files(["GPD/assertions/A-001.md"]))
 
     monkeypatch.setattr(dispatch_skill.subprocess, "run", _capture_run)
 

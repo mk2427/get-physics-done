@@ -119,6 +119,7 @@ def test_paper_build_nested_cwd_uses_project_root_for_storage_validation(
     nested_cwd = tmp_path / "notes"
     nested_cwd.mkdir()
     (tmp_path / "GPD").mkdir()
+    (tmp_path / "GPD" / "state.json").write_text("{}", encoding="utf-8")
     _write_basic_paper_config(tmp_path)
     paper_dir = tmp_path / "paper"
 

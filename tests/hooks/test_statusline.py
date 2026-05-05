@@ -456,7 +456,7 @@ class TestReadPosition:
         state = {"position": {"current_phase": 7, "total_phases": 8}}
         (planning / "state.json").write_text(json.dumps(state))
 
-        with patch.dict(os.environ, {"HOME": str(home)}):
+        with patch.dict(os.environ, {"HOME": str(home), "USERPROFILE": str(home)}):
             assert _read_position("~/project/src") == "P7/8"
 
     def test_no_position_key_returns_empty(self, tmp_path: Path) -> None:

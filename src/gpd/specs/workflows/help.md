@@ -221,7 +221,9 @@ This is the compact grouped list of runtime commands. For normal-terminal instal
 
 ### Knowledge and assertions
 
+- `gpd:digest-knowledge <topic or arXiv-ID> [--adversarial]` - Create or update a reviewed knowledge document
 - `gpd:digest-assertion <E-entry-ids | K-labels> [--adversarial]` - Create or review an assertion doc from EQN-REF entries or knowledge-doc K-labels
+- `gpd:adversarial-review <target-path> <charter>` - Run a Critic/Fixer adversarial review loop on an artifact
 
 ### Validation and analysis
 
@@ -568,6 +570,7 @@ Resume research from a previous session with full context restoration.
 
 - `state.json.continuation` is the durable authority for resume state; `gpd resume` is the read-only local summary and `gpd resume --recent` is the workspace picker
 - Canonical continuation fields define the public resume vocabulary: `active_resume_kind`, `active_resume_origin`, `active_resume_pointer`, `active_bounded_segment`, `derived_execution_head`, `active_resume_result`, `continuity_handoff_file`, `recorded_continuity_handoff_file`, `missing_continuity_handoff_file`, and `resume_candidates`. Compatibility-only intake fields stay internal.
+- The shared resume resolver reads canonical continuation first and keeps compatibility mirrors subordinate.
 - Use the recovery ladder (`gpd resume` -> `gpd resume --recent` -> `gpd:resume-work`) to pick up where you left off
 - Best first in-runtime command when returning to paused or interrupted work
 
@@ -608,6 +611,41 @@ List pending todos and select one to work on.
 
 Usage: `gpd:check-todos`
 Usage: `gpd:check-todos analytical`
+
+### Knowledge and Assertions
+
+**`gpd:digest-knowledge <topic or arXiv-ID> [--adversarial]`**
+Create or update a knowledge document with an explicit Draft to Stable trust lifecycle.
+
+- Digests a paper, local source, or topic into `GPD/knowledge/`
+- Records key results, equations, conventions, derivation sketches, and traps
+- `--adversarial` routes the Draft through the Critic/Fixer review loop before promotion
+- Can run the broader cluster/meta-audit/EQN-REF path when the adversarial workflow requests it
+
+Usage: `gpd:digest-knowledge 2301.12345`
+Usage: `gpd:digest-knowledge "Fuchsian ODE methods" --adversarial`
+
+**`gpd:digest-assertion <E-entry-ids | K-labels> [--adversarial]`**
+Create or review an assertion document from EQN-REF entries or Stable knowledge labels.
+
+- Produces restated-equation assertions from EQN-REF entries or per-equation K-labels
+- Produces derived-consequence assertions when the input requires a derivation sketch
+- `--adversarial` routes the Draft through the assertion-aware review loop before acceptance
+- Preserves canonical equation bodies exactly on restatement paths
+
+Usage: `gpd:digest-assertion E.12`
+Usage: `gpd:digest-assertion K-003 --adversarial`
+
+**`gpd:adversarial-review <target-path> <charter>`**
+Run one or more adversarial Critic/Fixer rounds against a single artifact.
+
+- Normalizes Critic findings into the canonical S/M/W/N severity stream
+- Dispatches artifact-specific critics for knowledge documents, assertions, plans, and briefs
+- Writes per-round review, fix, and loop summaries under `GPD/reviews/`
+- Converges only when open blocking findings are gone
+
+Usage: `gpd:adversarial-review GPD/knowledge/K-001-topic.md "find equation errors"`
+Usage: `gpd:adversarial-review GPD/assertions/A-001-result.md --artifact-kind assertion`
 
 ### Validation
 

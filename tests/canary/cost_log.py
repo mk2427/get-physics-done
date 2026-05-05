@@ -30,6 +30,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -42,10 +43,14 @@ _LOCK: threading.Lock = threading.Lock()
 # dispatch_skill) because the cost-log schema is the durable on-disk
 # contract; the dispatch return shape is the in-memory supplier.
 _SCHEMA_FIELDS: tuple[str, ...] = (
+    "schema_version",
     "arxiv_id",
+    "dispatch_ids",
     "kdoc_paths",
     "n_assertions",
+    "n_assertion_errors",
     "assertion_paths",
+    "review_paths",
     "kdoc_statuses",
     "cost_usd",
     "token_cost",
@@ -53,6 +58,7 @@ _SCHEMA_FIELDS: tuple[str, ...] = (
     "completed_at",
     "claude_session_id",
     "error_class",
+    "failure_details",
 )
 
 
@@ -60,6 +66,10 @@ def _build_entry(
     arxiv_id: str,
     kdoc_paths: list[Path],
     dispatch_result: dict[str, Any],
+    *,
+    knowledge_root: Path | None = None,
+    assertion_root: Path | None = None,
+    review_root: Path | None = None,
 ) -> dict[str, Any]:
     """Project a dispatch result into the canonical cost-log schema.
 
@@ -83,13 +93,47 @@ def _build_entry(
             return p.as_posix()
         return str(p).replace("\\", "/")
 
+    def _validate_partition(paths: list[Any], prefix: str, field: str) -> list[str]:
+        out = [_to_posix(p) for p in paths]
+        for p in out:
+            name = Path(p).name
+            if not name.startswith(prefix):
+                raise ValueError(f"{field} contains non-{prefix} artifact: {p}")
+        return out
+
+    def _validate_root(paths: list[str], root: Path | None, field: str) -> None:
+        if root is None:
+            return
+        root_resolved = Path(root).resolve()
+        for raw in paths:
+            path = Path(raw)
+            if not path.is_absolute():
+                continue
+            try:
+                path.resolve().relative_to(root_resolved)
+            except ValueError as exc:
+                raise ValueError(f"{field} path escapes expected root: {raw}") from exc
+
+    kdoc_out = _validate_partition(kdoc_paths or [], "K-", "kdoc_paths")
+    assertion_out = _validate_partition(
+        dispatch_result.get("assertion_paths") or [], "A-", "assertion_paths"
+    )
+    review_out = [_to_posix(p) for p in (dispatch_result.get("review_paths") or [])]
+    _validate_root(kdoc_out, knowledge_root, "kdoc_paths")
+    _validate_root(assertion_out, assertion_root, "assertion_paths")
+    _validate_root(review_out, review_root, "review_paths")
+
     return {
+        "schema_version": 2,
         "arxiv_id": arxiv_id,
-        "kdoc_paths": [_to_posix(p) for p in (kdoc_paths or [])],
+        "dispatch_ids": list(dispatch_result.get("dispatch_ids") or []),
+        "kdoc_paths": kdoc_out,
         "n_assertions": int(dispatch_result.get("n_assertions") or 0),
-        "assertion_paths": [
-            _to_posix(p) for p in (dispatch_result.get("assertion_paths") or [])
-        ],
+        "n_assertion_errors": int(
+            dispatch_result.get("n_assertion_errors") or 0
+        ),
+        "assertion_paths": assertion_out,
+        "review_paths": review_out,
         "kdoc_statuses": dict(dispatch_result.get("kdoc_statuses") or {}),
         "cost_usd": float(dispatch_result.get("cost_usd") or 0.0),
         "token_cost": int(token_cost or 0),
@@ -106,6 +150,11 @@ def _build_entry(
             "claude_session_id", dispatch_result.get("session_id")
         ),
         "error_class": dispatch_result.get("error_class"),
+        "failure_details": [
+            str(item)[-2000:]
+            for item in (dispatch_result.get("failure_details") or [])
+            if str(item)
+        ],
     }
 
 
@@ -115,6 +164,9 @@ def _append_paper_cost_locked(
     dispatch_result: dict[str, Any],
     *,
     log_path: Path,
+    knowledge_root: Path | None = None,
+    assertion_root: Path | None = None,
+    review_root: Path | None = None,
 ) -> None:
     """Append-under-caller-held-lock variant of :func:`append_paper_cost`.
 
@@ -125,7 +177,14 @@ def _append_paper_cost_locked(
     :data:`_LOCK` — call this function instead.
     """
     log_path = Path(log_path)
-    entry = _build_entry(arxiv_id, kdoc_paths, dispatch_result)
+    entry = _build_entry(
+        arxiv_id,
+        kdoc_paths,
+        dispatch_result,
+        knowledge_root=knowledge_root,
+        assertion_root=assertion_root,
+        review_root=review_root,
+    )
     new_line = json.dumps(entry, sort_keys=True) + "\n"
 
     if log_path.exists():
@@ -154,7 +213,14 @@ def _append_paper_cost_locked(
         fh.flush()
         os.fsync(fh.fileno())
     try:
-        tmp_path.replace(log_path)
+        for attempt in range(8):
+            try:
+                tmp_path.replace(log_path)
+                break
+            except PermissionError:
+                if attempt == 7:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
     except OSError:
         # On replace failure, leave log_path untouched. Best-effort
         # cleanup of the orphan tmp; ignore if it's already gone.
@@ -171,6 +237,9 @@ def append_paper_cost(
     dispatch_result: dict[str, Any],
     *,
     log_path: Path,
+    knowledge_root: Path | None = None,
+    assertion_root: Path | None = None,
+    review_root: Path | None = None,
 ) -> None:
     """Atomically append one paper's cost entry to ``log_path`` (JSONL).
 
@@ -196,7 +265,13 @@ def append_paper_cost(
     """
     with _LOCK:
         _append_paper_cost_locked(
-            arxiv_id, kdoc_paths, dispatch_result, log_path=log_path
+            arxiv_id,
+            kdoc_paths,
+            dispatch_result,
+            log_path=log_path,
+            knowledge_root=knowledge_root,
+            assertion_root=assertion_root,
+            review_root=review_root,
         )
 
 
@@ -218,6 +293,52 @@ def read_cost_log(log_path: Path) -> list[dict]:
                 continue
             entries.append(json.loads(line))
     return entries
+
+
+def read_entries(log_path: Path) -> list[dict]:
+    """Read entries and mark legacy forensic rows as schema v1."""
+    entries = read_cost_log(log_path)
+    for entry in entries:
+        entry.setdefault("schema_version", 1)
+        entry.setdefault("dispatch_ids", [])
+        entry.setdefault("review_paths", [])
+        entry.setdefault("n_assertion_errors", 0)
+        entry.setdefault("failure_details", [])
+    return entries
+
+
+def produced_files_from_entries(
+    entries: list[dict], *, ok_only: bool = True
+) -> list[Path]:
+    """Union schema-v2 kdoc and assertion paths from cost-log entries."""
+    out: list[Path] = []
+    seen: set[str] = set()
+    for entry in entries:
+        if ok_only and entry.get("error_class") != "ok":
+            continue
+        for raw in [*(entry.get("kdoc_paths") or []), *(entry.get("assertion_paths") or [])]:
+            key = str(raw)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(Path(raw))
+    return out
+
+
+def run_failures_from_entries(entries: list[dict]) -> list[dict]:
+    """Return cost-log entries that force nonzero canary status."""
+    failures: list[dict] = []
+    for entry in entries:
+        produced = [*(entry.get("kdoc_paths") or []), *(entry.get("assertion_paths") or [])]
+        if entry.get("error_class") != "ok":
+            failures.append({"reason": "non_ok_dispatch", "entry": entry})
+            continue
+        if int(entry.get("n_assertion_errors") or 0) > 0:
+            failures.append({"reason": "assertion_errors", "entry": entry})
+            continue
+        if entry.get("schema_version") == 2 and not produced:
+            failures.append({"reason": "ok_empty_produced_files", "entry": entry})
+    return failures
 
 
 def verify_log_against_manifest(

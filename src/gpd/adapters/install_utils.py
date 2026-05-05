@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import shlex
+import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
@@ -82,6 +83,33 @@ def _normalize_install_scope_flag(install_scope: str | None) -> str | None:
     if install_scope in ("global", "--global"):
         return "--global"
     return install_scope
+
+
+_WINDOWS_SHELL_META_CHARS = frozenset(' \t"&()^<>|')
+
+
+def _quote_command_token(token: str) -> str:
+    """Quote one command token for the local platform's shell syntax."""
+    if os.name != "nt":
+        return shlex.quote(token)
+
+    rendered = subprocess.list2cmdline([token])
+    if rendered == token and any(ch in token for ch in _WINDOWS_SHELL_META_CHARS):
+        escaped = token.replace('"', '\\"')
+        return f'"{escaped}"'
+    return rendered
+
+
+def _join_command_tokens(parts: list[str]) -> str:
+    """Render a command string from already separated tokens."""
+    return " ".join(_quote_command_token(part) for part in parts)
+
+
+def _windows_safe_executable_token(path: str) -> str:
+    """Return an executable token that TOML/model text can carry plainly on Windows."""
+    if os.name == "nt":
+        return path.replace("\\", "/")
+    return path
 
 
 def _paths_equal(left: Path, right: Path) -> bool:
@@ -218,7 +246,7 @@ def build_runtime_cli_bridge_command(
     )
     install_scope = "global" if is_global else "local"
     parts = [
-        hook_python_interpreter(),
+        _windows_safe_executable_token(hook_python_interpreter()),
         "-m",
         "gpd.runtime_cli",
         "--runtime",
@@ -230,7 +258,7 @@ def build_runtime_cli_bridge_command(
     ]
     if explicit_target:
         parts.append("--explicit-target")
-    return " ".join(shlex.quote(part) for part in parts)
+    return _join_command_tokens(parts)
 
 
 def build_runtime_install_repair_command(
@@ -249,7 +277,7 @@ def build_runtime_install_repair_command(
     if normalized_scope:
         command = f"{command} {normalized_scope}".strip()
     if explicit_target:
-        command = f"{command} --target-dir {shlex.quote(str(target_dir))}"
+        command = f"{command} --target-dir {_quote_command_token(str(target_dir))}"
     return command
 
 
@@ -803,7 +831,7 @@ def read_settings(settings_path: str | Path) -> dict[str, object]:
 
 
 def write_settings(settings_path: str | Path, settings: dict[str, object]) -> None:
-    """Write *settings* as JSON atomically (write to temp, then rename).
+    """Write *settings* as JSON atomically (write to temp, then replace).
 
     Raises:
         PermissionError: If the target directory or file is not writable.
@@ -820,7 +848,7 @@ def write_settings(settings_path: str | Path, settings: dict[str, object]) -> No
     except PermissionError as exc:
         raise PermissionError(f"Cannot write to settings directory {p.parent} — check permissions") from exc
     try:
-        tmp_path.rename(p)
+        tmp_path.replace(p)
     except OSError:
         tmp_path.unlink(missing_ok=True)
         raise
@@ -1272,13 +1300,13 @@ def copy_with_path_replacement(
 
         # Swap into place
         if dest_dir.exists():
-            dest_dir.rename(old_dir)
+            _move_install_dir(dest_dir, old_dir)
         try:
-            tmp_dir.rename(dest_dir)
+            _move_install_dir(tmp_dir, dest_dir)
         except OSError:
             # Rename failed — restore old directory
             if old_dir.exists():
-                old_dir.rename(dest_dir)
+                _move_install_dir(old_dir, dest_dir)
             raise
 
         # Swap succeeded — clean up old
@@ -1683,13 +1711,13 @@ def save_local_patches(
 
     try:
         if patches_dir.exists():
-            patches_dir.rename(previous_dir)
-        staging_dir.rename(patches_dir)
+            _move_install_dir(patches_dir, previous_dir)
+        _move_install_dir(staging_dir, patches_dir)
     except Exception:
         if staging_dir.exists():
             shutil.rmtree(staging_dir)
         if previous_dir.exists() and not patches_dir.exists():
-            previous_dir.rename(patches_dir)
+            _move_install_dir(previous_dir, patches_dir)
         raise
     else:
         if previous_dir.exists():
@@ -2087,9 +2115,9 @@ def build_hook_command(
     """
     command_interpreter = interpreter or hook_python_interpreter()
     if is_global or explicit_target:
-        hooks_path = str(target_dir / "hooks" / hook_filename).replace("\\", "/")
-        return f"{shlex.quote(command_interpreter)} {shlex.quote(hooks_path)}"
-    return f"{shlex.quote(command_interpreter)} {shlex.quote(f'{config_dir_name}/hooks/{hook_filename}')}"
+        hooks_path = str(target_dir / "hooks" / hook_filename)
+        return _join_command_tokens([command_interpreter, hooks_path])
+    return _join_command_tokens([command_interpreter, f"{config_dir_name}/hooks/{hook_filename}"])
 
 
 # ---------------------------------------------------------------------------
@@ -2102,6 +2130,36 @@ def _rmtree(p: Path) -> None:
     import shutil
 
     shutil.rmtree(str(p), ignore_errors=True)
+
+
+def _move_install_dir(src: Path, dest: Path) -> None:
+    """Move an install directory, falling back for transient Windows rename denials."""
+    try:
+        src.rename(dest)
+        return
+    except PermissionError as exc:
+        if os.name != "nt" or dest.exists():
+            raise
+
+    import shutil
+    import time
+
+    for delay in (0.05, 0.1, 0.2):
+        time.sleep(delay)
+        try:
+            src.rename(dest)
+            return
+        except PermissionError:
+            if dest.exists():
+                raise
+
+    try:
+        shutil.copytree(str(src), str(dest), symlinks=True)
+    except Exception:
+        if dest.exists():
+            _rmtree(dest)
+        raise exc
+    _rmtree(src)
 
 
 def _gpd_home_dir() -> Path:

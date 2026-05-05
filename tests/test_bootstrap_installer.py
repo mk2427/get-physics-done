@@ -1081,15 +1081,17 @@ const launchWrapperDisjunction = launchWrapperPermissionSurfaceKinds.length === 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const futureLaunchWrapperPermissionKindCatalog = JSON.parse(JSON.stringify(catalog));
-const launchWrapperRuntime = futureLaunchWrapperPermissionKindCatalog.find(
+const launchWrapperRuntimeIndex = futureLaunchWrapperPermissionKindCatalog.findIndex(
   (runtime) => runtime.capabilities.permissions_surface === "launch-wrapper"
 );
-launchWrapperRuntime.capabilities.permission_surface_kind = "future.json:launchWrapper";
-assert.equal(
-  validateRuntimeCatalog(futureLaunchWrapperPermissionKindCatalog).find(
-    (runtime) => runtime.runtime_name === launchWrapperRuntime.runtime_name
-  ).capabilities.permission_surface_kind,
-  "future.json:launchWrapper"
+assert.notEqual(launchWrapperRuntimeIndex, -1);
+futureLaunchWrapperPermissionKindCatalog[launchWrapperRuntimeIndex]
+  .capabilities.permission_surface_kind = "future.json:launchWrapper";
+assert.throws(
+  () => validateRuntimeCatalog(futureLaunchWrapperPermissionKindCatalog),
+  new RegExp(
+    `runtime catalog entry ${launchWrapperRuntimeIndex}\\.capabilities\\.permission_surface_kind must be a bundled special surface kind when permissions_surface=launch-wrapper`
+  )
 );
 
 const badPermissionKindCatalog = JSON.parse(JSON.stringify(catalog));
@@ -1097,7 +1099,7 @@ badPermissionKindCatalog[0].capabilities.permission_surface_kind = "approval-tog
 assert.throws(
   () => validateRuntimeCatalog(badPermissionKindCatalog),
   new RegExp(
-    `runtime catalog entry 0\\.capabilities\\.permission_surface_kind must be "none", ${escapeRegex(launchWrapperDisjunction)}, or a config surface label like file:key`
+    `runtime catalog entry 0\\.capabilities\\.permission_surface_kind must be "none", a bundled special surface kind, or a config surface label like file:key`
   )
 );
 

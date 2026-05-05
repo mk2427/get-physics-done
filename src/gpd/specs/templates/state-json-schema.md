@@ -7,6 +7,10 @@ purpose: Canonical schema for GPD/state.json — the machine-readable research s
 
 Canonical schema for `GPD/state.json`. This file is the authoritative machine-readable state. STATE.md is a human-readable view generated from it.
 
+Runtime recovery commands such as `gpd:pause-work` and `gpd:resume-work` are the coding-assistant surfaces. `gpd resume` is the public local read-only recovery surface, while `gpd --raw resume` remains the machine-readable backend.
+
+That backend treats `continuation` as primary.
+
 Source of truth: `default_state_dict()` in `gpd.core.state`.
 
 ---
@@ -186,6 +190,8 @@ Project contracts must include at least one observable, claim, or deliverable.
 Canonical IDs and other required string fields are trimmed before validation. Blank-after-trim values are invalid, and duplicates that differ only by surrounding whitespace still collide after normalization.
 
 `scope.in_scope` must name at least one project boundary or objective.
+
+Descriptive grounding phrases must contain at least three words when they are used as human-readable anchors rather than IDs or paths.
 
 `context_intake` must not be empty. At least one of `must_read_refs`, `must_include_prior_outputs`, `user_asserted_anchors`, `known_good_baselines`, `context_gaps`, or `crucial_inputs` must carry a non-empty item.
 `context_intake`, `approach_policy`, and `uncertainty_markers` are JSON objects when present; do not collapse them to strings or lists.

@@ -32,6 +32,9 @@ topic: "[topic name]"
 cluster: ""  # optional: group this kdoc into a named cluster for phase-3 auto-partition; leave blank to fall into "unclustered"
 sources:
   - "[arXiv:XXXX.XXXXX or DOI or textbook reference]"
+source_arxiv_id: null      # canary mode: exact manifest arXiv ID, e.g. "2511.01209"
+source_filename: null      # canary mode: exact manifest source filename
+source_path_sha256: null   # canary mode: hash supplied by orchestrator, if available
 created: YYYY-MM-DD
 last_reviewed: YYYY-MM-DD
 review_rounds: 0

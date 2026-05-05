@@ -217,7 +217,7 @@ class TestBuildPaper:
         from gpd.mcp.paper.compiler import build_paper
 
         fig_path = tmp_path / "velocity.png"
-        Image.new("RGB", (200, 200), color="blue").save(fig_path)
+        Image.new("RGB", (2400, 2400), color="blue").save(fig_path)
 
         config = PaperConfig(
             title="Figure Paper",
@@ -449,7 +449,7 @@ class TestBuildPaper:
         from gpd.mcp.paper.compiler import build_paper
 
         good_figure = tmp_path / "good.png"
-        Image.new("RGB", (200, 200), color="purple").save(good_figure)
+        Image.new("RGB", (2400, 2400), color="purple").save(good_figure)
         bad_figure = tmp_path / "bad.gif"
         bad_figure.write_bytes(b"GIF89a")
 

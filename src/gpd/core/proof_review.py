@@ -343,6 +343,21 @@ def resolve_manuscript_proof_review_status(
         watched_files,
         _resolve_review_artifacts(project_root, review_anchor.proof_artifact_paths),
     )
+    text_is_theorem_bearing = manuscript_has_theorem_bearing_language(project_root, entrypoint)
+    if text_is_theorem_bearing and not review_anchor.proof_bearing:
+        return ProofReviewStatus(
+            scope="manuscript",
+            state="missing_required_artifact",
+            can_rely_on_prior_review=False,
+            detail=(
+                "active manuscript text contains theorem-bearing language, "
+                "but the latest matching math review did not inventory "
+                "theorem-bearing claims or produce a proof-redteam artifact"
+            ),
+            manifest_path=manifest_path,
+            anchor_artifact=review_anchor.stage_artifact,
+            watched_files=watched_files,
+        )
     if review_anchor.proof_bearing:
         proof_redteam_path = project_root / "GPD" / "review" / f"PROOF-REDTEAM{review_anchor.round_suffix}.md"
         watched_files = _with_extra_watched_files(watched_files, proof_redteam_path)

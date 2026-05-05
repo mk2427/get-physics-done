@@ -756,6 +756,17 @@ def _is_placeholder_only_guidance_text(value: str) -> bool:
     return _shared_is_placeholder_only_guidance_text(value)
 
 
+def _unscoped_artifact_path_can_escape_project(value: str) -> bool:
+    stripped = value.strip()
+    candidate_path = Path(stripped).expanduser()
+    return (
+        candidate_path.is_absolute()
+        or stripped.startswith(("/", "\\"))
+        or stripped.startswith("~")
+        or ".." in candidate_path.parts
+    )
+
+
 def _is_concrete_text_grounding(
     value: str,
     *,
@@ -767,8 +778,7 @@ def _is_concrete_text_grounding(
     if not lowered:
         return False
     if project_root is None and _shared_is_project_artifact_path(value, project_root=None):
-        candidate_path = Path(value.strip()).expanduser()
-        if candidate_path.is_absolute() or ".." in candidate_path.parts:
+        if _unscoped_artifact_path_can_escape_project(value):
             return False
     if any(
         _shared_is_concrete_reference_locator(value, reference_kind=reference_kind, project_root=project_root)
@@ -777,8 +787,7 @@ def _is_concrete_text_grounding(
         return True
     if _shared_is_project_artifact_path(value, project_root=project_root):
         if project_root is None:
-            candidate_path = Path(value.strip()).expanduser()
-            if candidate_path.is_absolute() or ".." in candidate_path.parts:
+            if _unscoped_artifact_path_can_escape_project(value):
                 return False
         return True
     if any(pattern.search(lowered) for pattern in _ANCHOR_UNKNOWN_DIRECT_PATTERNS):

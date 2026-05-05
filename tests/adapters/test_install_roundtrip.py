@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import tomllib
 from pathlib import Path
@@ -61,7 +62,11 @@ def _make_checkout_stub(tmp_path: Path) -> tuple[Path, Path]:
         '[project]\nname = "get-physics-done"\nversion = "9.9.9"\n',
         encoding="utf-8",
     )
-    checkout_python = checkout_root / ".venv" / "bin" / "python"
+    checkout_python = (
+        checkout_root / ".venv" / "Scripts" / "python.exe"
+        if os.name == "nt"
+        else checkout_root / ".venv" / "bin" / "python"
+    )
     checkout_python.parent.mkdir(parents=True, exist_ok=True)
     checkout_python.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
     return checkout_root, checkout_python
@@ -341,7 +346,10 @@ def test_install_artifacts_pin_checkout_python_when_running_from_checkout(
 
     installed_text = "\n".join(_collect_textual_artifacts(root) for root in artifact_roots)
 
-    assert str(checkout_python) in installed_text
+    expected_checkout_python = str(checkout_python)
+    if os.name == "nt":
+        expected_checkout_python = expected_checkout_python.replace("\\", "/")
+    assert expected_checkout_python in installed_text
     assert stale_managed_python not in installed_text
 
 

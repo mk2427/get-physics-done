@@ -1043,6 +1043,7 @@ def test_validate_frontmatter_summary_with_source_path_reports_unresolved_plan_c
 def test_validate_frontmatter_summary_does_not_resolve_plan_contract_ref_above_project_root(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     (project_root / "GPD").mkdir(parents=True)
+    (project_root / "GPD" / "state.json").write_text("{}", encoding="utf-8")
     summary_dir = project_root / "artifacts" / "nested"
     summary_dir.mkdir(parents=True)
     summary_path = summary_dir / "01-SUMMARY.md"

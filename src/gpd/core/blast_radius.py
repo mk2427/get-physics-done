@@ -21,21 +21,32 @@ _SCAN_CACHE: dict[tuple[str, int], dict[str, list[str]]] = {}
 
 
 def _cache_key(state: dict) -> int:
-    """Return a cheap monotonic proxy for "kdoc status has transitioned".
+    """Return a cache key that changes when dependency inputs change.
 
-    Counts the number of kdocs in state whose status is anything other than
-    "Draft".  If ``state`` has no ``knowledge_docs`` key the result is 0
-    (cache is effectively disabled — every call is a cache miss, but the
-    function still returns correct results).
+    Includes result dependency edges and kdoc statuses so one scan cannot reuse
+    another state object's stale affected-result list.
     """
+    result_deps: list[tuple[str, tuple[str, ...]]] = []
+    for result in state.get("intermediate_results", []):
+        if not isinstance(result, dict):
+            continue
+        rid = str(result.get("id") or "")
+        deps = tuple(str(dep) for dep in result.get("knowledge_deps", []) or [])
+        result_deps.append((rid, deps))
+
     kdocs = state.get("knowledge_docs")
-    if not kdocs or not isinstance(kdocs, list):
-        return 0
-    return sum(
-        1
-        for kd in kdocs
-        if isinstance(kd, dict) and kd.get("status", "Draft") != "Draft"
-    )
+    kdoc_statuses: list[tuple[str, str]] = []
+    if isinstance(kdocs, list):
+        for kdoc in kdocs:
+            if not isinstance(kdoc, dict):
+                continue
+            kdoc_statuses.append(
+                (
+                    str(kdoc.get("kdoc_id") or kdoc.get("id") or ""),
+                    str(kdoc.get("status", "Draft")),
+                )
+            )
+    return hash((tuple(result_deps), tuple(kdoc_statuses)))
 
 
 def knowledge_invalidation_scan(state: dict, kdoc_id: str) -> dict[str, list[str]]:

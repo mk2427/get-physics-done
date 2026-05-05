@@ -862,7 +862,7 @@ def test_build_plan_tool_preflight_parses_quoted_command_executables_with_spaces
 
     assert result.passed is True
     assert result.checks[0].available is True
-    assert result.checks[0].detail == f"{executable} found at {Path(executable).resolve(strict=False)}"
+    assert result.checks[0].detail == f"{executable} found at {executable}"
 
 
 def test_build_plan_tool_preflight_skips_leading_env_assignments_when_probing_command(
@@ -945,7 +945,7 @@ def test_build_plan_tool_preflight_handles_env_only_invocations(
 
     assert result.passed is True
     assert result.checks[0].available is True
-    assert result.checks[0].detail == f"env found at {Path('/usr/bin/env').resolve(strict=False)}"
+    assert result.checks[0].detail == "env found at /usr/bin/env"
 
 
 def test_build_plan_tool_preflight_resolves_env_wrapped_command_after_env_flag_with_value(

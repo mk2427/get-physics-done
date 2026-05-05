@@ -17,6 +17,7 @@ import anyio
 import pytest
 
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "stage0"
+FAKE_PROJECT_DIR = str((Path.cwd() / "__fake_mcp_project__").resolve(strict=False))
 
 
 def _load_project_contract_fixture() -> dict[str, object]:
@@ -1674,7 +1675,7 @@ class TestStateServer:
                 ),
             ),
         ):
-            result = load_state_json(Path("/fake/project"))
+            result = load_state_json(Path(FAKE_PROJECT_DIR))
 
         assert result is not None
         assert "session" not in result
@@ -1696,7 +1697,7 @@ class TestStateServer:
         }
 
         with patch("gpd.mcp.servers.state_server.load_state_json", return_value=mock_state):
-            result = get_state("/fake/project")
+            result = get_state(FAKE_PROJECT_DIR)
         assert "position" in result
         assert result["position"]["current_phase"] == "01"
         assert result["project_contract_load_info"]["status"] == "loaded"
@@ -1734,7 +1735,7 @@ class TestStateServer:
         from gpd.mcp.servers.state_server import get_state
 
         with patch("gpd.mcp.servers.state_server.load_state_json", return_value=None):
-            result = get_state("/fake/project")
+            result = get_state(FAKE_PROJECT_DIR)
         assert "error" in result
 
     def test_get_state_gpd_error(self):
@@ -1742,21 +1743,21 @@ class TestStateServer:
         from gpd.mcp.servers.state_server import get_state
 
         with patch("gpd.mcp.servers.state_server.load_state_json", side_effect=GPDError("boom")):
-            result = get_state("/fake/project")
+            result = get_state(FAKE_PROJECT_DIR)
         assert result == {"error": "boom", "schema_version": 1}
 
     def test_get_state_os_error(self):
         from gpd.mcp.servers.state_server import get_state
 
         with patch("gpd.mcp.servers.state_server.load_state_json", side_effect=OSError("permission denied")):
-            result = get_state("/fake/project")
+            result = get_state(FAKE_PROJECT_DIR)
         assert result == {"error": "permission denied", "schema_version": 1}
 
     def test_get_state_value_error(self):
         from gpd.mcp.servers.state_server import get_state
 
         with patch("gpd.mcp.servers.state_server.load_state_json", side_effect=ValueError("bad json")):
-            result = get_state("/fake/project")
+            result = get_state(FAKE_PROJECT_DIR)
         assert result == {"error": "bad json", "schema_version": 1}
 
     def test_get_phase_info_gpd_error(self):
@@ -1764,14 +1765,14 @@ class TestStateServer:
         from gpd.mcp.servers.state_server import get_phase_info
 
         with patch("gpd.core.phases.find_phase", side_effect=GPDError("phase read failed")):
-            result = get_phase_info("/fake/project", "01")
+            result = get_phase_info(FAKE_PROJECT_DIR, "01")
         assert result == {"error": "phase read failed", "schema_version": 1}
 
     def test_get_phase_info_os_error(self):
         from gpd.mcp.servers.state_server import get_phase_info
 
         with patch("gpd.core.phases.find_phase", side_effect=OSError("disk error")):
-            result = get_phase_info("/fake/project", "01")
+            result = get_phase_info(FAKE_PROJECT_DIR, "01")
         assert result == {"error": "disk error", "schema_version": 1}
 
     def test_get_progress_gpd_error(self):
@@ -1779,14 +1780,14 @@ class TestStateServer:
         from gpd.mcp.servers.state_server import get_progress
 
         with patch("gpd.mcp.servers.state_server.progress_render", side_effect=GPDError("no state")):
-            result = get_progress("/fake/project")
+            result = get_progress(FAKE_PROJECT_DIR)
         assert result == {"error": "no state", "schema_version": 1}
 
     def test_get_progress_os_error(self):
         from gpd.mcp.servers.state_server import get_progress
 
         with patch("gpd.mcp.servers.state_server.progress_render", side_effect=OSError("read only")):
-            result = get_progress("/fake/project")
+            result = get_progress(FAKE_PROJECT_DIR)
         assert result == {"error": "read only", "schema_version": 1}
 
     def test_run_health_check_gpd_error(self):
@@ -1794,14 +1795,14 @@ class TestStateServer:
         from gpd.mcp.servers.state_server import run_health_check
 
         with patch("gpd.mcp.servers.state_server.run_health", side_effect=GPDError("health broke")):
-            result = run_health_check("/fake/project")
+            result = run_health_check(FAKE_PROJECT_DIR)
         assert result == {"error": "health broke", "schema_version": 1}
 
     def test_run_health_check_os_error(self):
         from gpd.mcp.servers.state_server import run_health_check
 
         with patch("gpd.mcp.servers.state_server.run_health", side_effect=OSError("no access")):
-            result = run_health_check("/fake/project")
+            result = run_health_check(FAKE_PROJECT_DIR)
         assert result == {"error": "no access", "schema_version": 1}
 
     def test_get_config_gpd_error(self):
@@ -1809,21 +1810,21 @@ class TestStateServer:
         from gpd.mcp.servers.state_server import get_config
 
         with patch("gpd.mcp.servers.state_server.load_config", side_effect=GPDError("config missing")):
-            result = get_config("/fake/project")
+            result = get_config(FAKE_PROJECT_DIR)
         assert result == {"error": "config missing", "schema_version": 1}
 
     def test_get_config_os_error(self):
         from gpd.mcp.servers.state_server import get_config
 
         with patch("gpd.mcp.servers.state_server.load_config", side_effect=OSError("not found")):
-            result = get_config("/fake/project")
+            result = get_config(FAKE_PROJECT_DIR)
         assert result == {"error": "not found", "schema_version": 1}
 
     def test_get_config_value_error(self):
         from gpd.mcp.servers.state_server import get_config
 
         with patch("gpd.mcp.servers.state_server.load_config", side_effect=ValueError("invalid toml")):
-            result = get_config("/fake/project")
+            result = get_config(FAKE_PROJECT_DIR)
         assert result == {"error": "invalid toml", "schema_version": 1}
 
     def test_get_phase_info_found(self):
@@ -1839,7 +1840,7 @@ class TestStateServer:
         mock_info.incomplete_plans = ["plan-03.md"]
 
         with patch("gpd.core.phases.find_phase", return_value=mock_info):
-            result = get_phase_info("/fake/project", "01")
+            result = get_phase_info(FAKE_PROJECT_DIR, "01")
         assert result["phase_number"] == "01"
         assert result["plan_count"] == 3
         assert result["summary_count"] == 2
@@ -1849,7 +1850,7 @@ class TestStateServer:
         from gpd.mcp.servers.state_server import get_phase_info
 
         with patch("gpd.core.phases.find_phase", return_value=None):
-            result = get_phase_info("/fake/project", "99")
+            result = get_phase_info(FAKE_PROJECT_DIR, "99")
         assert "error" in result
 
     def test_advance_plan(self):
@@ -1859,7 +1860,7 @@ class TestStateServer:
         mock_result.model_dump.return_value = {"advanced": True, "new_plan": 2}
 
         with patch("gpd.mcp.servers.state_server.state_advance_plan", return_value=mock_result):
-            result = advance_plan("/fake/project")
+            result = advance_plan(FAKE_PROJECT_DIR)
         assert result["advanced"] is True
 
     def test_get_progress(self):
@@ -1869,7 +1870,7 @@ class TestStateServer:
         mock_result.model_dump.return_value = {"milestone_version": "v1.0", "milestone_name": "Test", "percent": 50}
 
         with patch("gpd.mcp.servers.state_server.progress_render", return_value=mock_result):
-            result = get_progress("/fake/project")
+            result = get_progress(FAKE_PROJECT_DIR)
         assert result["percent"] == 50
 
     def test_validate_state(self):
@@ -1879,7 +1880,7 @@ class TestStateServer:
         mock_result.model_dump.return_value = {"valid": True, "issues": [], "warnings": []}
 
         with patch("gpd.mcp.servers.state_server.state_validate", return_value=mock_result):
-            result = validate_state("/fake/project")
+            result = validate_state(FAKE_PROJECT_DIR)
         assert result["valid"] is True
 
     def test_run_health_check(self):
@@ -1893,7 +1894,7 @@ class TestStateServer:
         }
 
         with patch("gpd.mcp.servers.state_server.run_health", return_value=mock_report):
-            result = run_health_check("/fake/project")
+            result = run_health_check(FAKE_PROJECT_DIR)
         assert result["passed"] == 10
 
     def test_run_health_check_with_fix(self):
@@ -1903,7 +1904,7 @@ class TestStateServer:
         mock_report.model_dump.return_value = {"passed": 11, "failed": 0, "fixes_applied": 1}
 
         with patch("gpd.mcp.servers.state_server.run_health", return_value=mock_report) as mock_fn:
-            result = run_health_check("/fake/project", fix=True)
+            result = run_health_check(FAKE_PROJECT_DIR, fix=True)
         mock_fn.assert_called_once_with(ANY, fix=True)
         assert result["fixes_applied"] == 1
 
@@ -1914,7 +1915,7 @@ class TestStateServer:
         mock_config.model_dump.return_value = {"model_profile": "deep-theory", "autonomy": "balanced"}
 
         with patch("gpd.mcp.servers.state_server.load_config", return_value=mock_config):
-            result = get_config("/fake/project")
+            result = get_config(FAKE_PROJECT_DIR)
         assert result["model_profile"] == "deep-theory"
 
 

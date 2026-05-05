@@ -13,6 +13,23 @@ from gpd.core.root_resolution import (
 )
 
 
+def _mark_project(project: Path, marker: str = "state_json") -> None:
+    gpd_dir = project / "GPD"
+    gpd_dir.mkdir(parents=True, exist_ok=True)
+    if marker == "state_json":
+        (gpd_dir / "state.json").write_text("{}", encoding="utf-8")
+    elif marker == "state_md":
+        (gpd_dir / "STATE.md").write_text("# State\n", encoding="utf-8")
+    elif marker == "roadmap":
+        (gpd_dir / "ROADMAP.md").write_text("# Roadmap\n", encoding="utf-8")
+    elif marker == "project_md":
+        (gpd_dir / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
+    elif marker == "phases":
+        (gpd_dir / "phases").mkdir()
+    else:
+        raise AssertionError(f"unknown marker: {marker}")
+
+
 def test_normalize_workspace_hint_resolves_explicit_path(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -32,7 +49,7 @@ def test_resolve_project_roots_uses_verified_explicit_project_dir_walkup(tmp_pat
     project = tmp_path / "project"
     nested_hint = project / "src" / "notes"
     other_workspace = tmp_path / "workspace"
-    (project / "GPD").mkdir(parents=True)
+    _mark_project(project)
     nested_hint.mkdir(parents=True)
     other_workspace.mkdir()
 
@@ -53,7 +70,7 @@ def test_resolve_project_roots_prefers_verified_workspace_over_unverified_explic
     project = tmp_path / "project"
     workspace = project / "src" / "notes"
     missing_project_dir = tmp_path / "not-a-project"
-    (project / "GPD").mkdir(parents=True)
+    _mark_project(project)
     workspace.mkdir(parents=True)
 
     resolution = resolve_project_roots(workspace, project_dir=missing_project_dir)
@@ -113,6 +130,56 @@ def test_resolve_project_roots_ignores_a_file_named_gpd(tmp_path: Path) -> None:
     assert resolution.has_project_layout is False
     assert resolution.walk_up_steps == 0
     assert resolve_project_root(workspace, require_layout=True) is None
+
+
+def test_resolve_project_roots_does_not_verify_bare_gpd_directory(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    workspace = project / "workspace"
+    workspace.mkdir(parents=True)
+    (project / "GPD").mkdir()
+
+    resolution = resolve_project_roots(workspace)
+
+    assert resolution is not None
+    assert resolution.project_root == workspace.resolve(strict=False)
+    assert resolution.basis == RootResolutionBasis.WORKSPACE
+    assert resolution.confidence == RootResolutionConfidence.LOW
+    assert resolution.has_project_layout is False
+    assert resolve_project_root(workspace, require_layout=True) is None
+
+
+def test_resolve_project_roots_rejects_runtime_install_artifacts_as_markers(tmp_path: Path) -> None:
+    runtime_parent = tmp_path / "Local"
+    runtime_gpd = runtime_parent / "GPD"
+    workspace = runtime_parent / "Temp" / "pytest-case"
+    workspace.mkdir(parents=True)
+    runtime_gpd.mkdir(parents=True)
+    (runtime_parent / "GPD.exe").write_text("runtime binary", encoding="utf-8")
+    (runtime_gpd / "integrations.json").write_text('{"wolfram": {"enabled": false}}', encoding="utf-8")
+    (runtime_gpd / "uv-bundle").mkdir()
+    (runtime_gpd / "observability").mkdir()
+
+    resolution = resolve_project_roots(workspace)
+
+    assert resolution is not None
+    assert resolution.project_root == workspace.resolve(strict=False)
+    assert resolution.has_project_layout is False
+    assert resolve_project_root(workspace, require_layout=True) is None
+
+
+def test_resolve_project_roots_accepts_each_project_marker(tmp_path: Path) -> None:
+    markers = ("state_json", "state_md", "roadmap", "project_md", "phases")
+    for marker in markers:
+        project = tmp_path / marker
+        workspace = project / "src" / "notes"
+        _mark_project(project, marker)
+        workspace.mkdir(parents=True)
+
+        resolution = resolve_project_roots(workspace)
+
+        assert resolution is not None
+        assert resolution.project_root == project.resolve(strict=False)
+        assert resolution.has_project_layout is True
 
 
 def test_resolve_project_root_require_layout_rejects_unverified_fallback(tmp_path: Path) -> None:

@@ -27,8 +27,10 @@ Invocation:
 
 This agent is NOT directly user-facing (surface: internal); users invoke
 `/gpd:digest-knowledge` and the orchestrator routes to the digester. No
-MODEL_PROFILES entry is required for correct behavior; the agent falls
-through to AGENT_DEFAULT_TIERS → ModelTier.TIER_2 (the balanced default).
+MODEL_PROFILES and AGENT_DEFAULT_TIERS entries in src/gpd/core/config.py
+assign profile-calibrated tiers. The review/default path uses tier-1
+because this agent is the Fixer-side partner in load-bearing adversarial
+knowledge loops.
 -->
 
 Commit authority: orchestrator-only. Do NOT run `gpd commit`, `git commit`, or stage files. Return changed paths in `gpd_return.files_written`.
@@ -64,6 +66,14 @@ You do NOT parse `source_format` from raw filesystem inspection — the orchestr
 
 ### Sandbox-aware writes (`canary_run_root`)
 
+Plan-008 canary mode also accepts `canary_dispatch_root`,
+`canary_output_root`, and `canary_manifest_path`. When any of these are
+present, they are the semantic output contract, not just permission hints. Write
+the kdoc under the supplied canary dispatch/output root and do not write live
+`GPD/knowledge/`, `GPD/assertions/`, or `GPD/reviews/`. If legacy prose
+elsewhere in this workflow says `GPD/knowledge/`, treat that as the non-canary
+default only.
+
 When the orchestrator passes a `canary_run_root` parameter (a future plan-006 surface for the fresh-sandbox-per-run model in §C2 M4/M6), write produced kdocs to `<canary_run_root>/knowledge/<slug>.md` instead of the project's default `GPD/knowledge/K-{NNN}-{slug}.md` location. This isolates BFSS canary outputs into a per-run sandbox so a failed canary cannot pollute the project-level knowledge directory of the host repository.
 
 Rules:
@@ -72,6 +82,13 @@ Rules:
 - If `canary_run_root` is unset (the default light-path / adversarial-path case), the existing `GPD/knowledge/K-{NNN}-{slug}.md` write target applies, and the Step 2 ID-assignment logic is unchanged.
 - Frontmatter still emits `status: Draft` in both cases — sandbox status is not a kdoc-status concept.
 - The `gpd_return.files_written` field reports whichever path you actually wrote to (sandbox or project), not a hardcoded `GPD/knowledge/...` string. The orchestrator uses `files_written` to wire the file into downstream review steps; emitting the wrong path silently breaks the canary run.
+
+Additional Plan-008 canary rules:
+
+- Frontmatter must include machine-readable source ownership: `source_arxiv_id` exactly matching the manifest arXiv ID, plus `source_filename` and `source_path_sha256` when the orchestrator supplies them.
+- These canary ownership fields are hard requirements, not advisory metadata. Copy the orchestrator-supplied scalar values exactly into YAML frontmatter. Do not shorten `source_filename` to a basename when the manifest value includes a subdirectory such as `sources/<id>.tex`. Do not emit `source_path_sha256: null`, an empty value, or a PDF hash when the orchestrator supplied a `.tex` source hash.
+- If you cannot preserve the exact canary ownership scalars, return `gpd_return.status: blocked` and do not write a kdoc; a kdoc with weak source ownership is a canary failure.
+- If `canary_manifest_path` is supplied, write a JSON manifest listing the actual emitted kdoc/review paths in addition to returning them in `gpd_return.files_written`.
 
 ### Cost note (informational)
 

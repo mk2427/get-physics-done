@@ -156,7 +156,7 @@ class TestPreCommitCheck:
 
         assert result.passed is True
         assert result.files_checked == 1
-        assert result.details[0].file == "docs/ok.md"
+        assert result.details[0].file.replace("\\", "/") == "docs/ok.md"
 
     def test_scratch_commit_target_fails_storage_validation(self, tmp_path: Path) -> None:
         target = tmp_path / "GPD" / "tmp" / "final.csv"

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+FAKE_PROJECT_DIR = str((Path.cwd() / "__fake_mcp_project__").resolve(strict=False))
 
 
 def _assert_strict_envelope(result: object, expected_payload: dict[str, object]) -> None:
@@ -161,6 +164,6 @@ def test_conventions_error_envelope() -> None:
         "gpd.mcp.servers.conventions_server._update_lock_in_project",
         side_effect=TimeoutError("lock acquisition timed out"),
     ):
-        result = convention_set("/tmp/project", "metric_signature", "(+,-,-,-)")
+        result = convention_set(FAKE_PROJECT_DIR, "metric_signature", "(+,-,-,-)")
 
     _assert_strict_envelope(result, {"error": "lock acquisition timed out"})

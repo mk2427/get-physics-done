@@ -10,7 +10,7 @@ type: continue-here-template
 Copy and fill this structure for `GPD/phases/XX-name/.continue-here.md`.
 This is the canonical temporary phase handoff artifact written by `gpd:pause-work` and consumed by `gpd:resume-work` and `gpd resume`. The machine-readable local recovery surface is `gpd --raw resume`, and this file is only a projection of canonical continuation.
 
-This file is not the authority for project position, session continuity, or resume ranking. Those responsibilities stay with `GPD/state.json`, `GPD/state.json.bak`, `GPD/STATE.md`, append-only execution lineage, and the derived execution head / `GPD/observability/current-execution.json` mirror. `gpd --raw resume` resolves the canonical continuation view across those surfaces; the body below is for humans and recovery tooling, not a second state source:
+This file is **not** the authoritative store for project position, continuation state, or resume ranking. Those responsibilities stay with `GPD/state.json`, `GPD/state.json.bak`, `GPD/STATE.md`, append-only execution lineage, and the derived execution head / `GPD/observability/current-execution.json` mirror. Deleting or missing this file does not erase project state by itself. It must not be treated as the storage authority for project status, continuation state, or bounded resume ranking. `gpd --raw resume` resolves the canonical continuation view across those surfaces; the body below is for humans and recovery tooling, not a second state source:
 
 If this pause follows a successful derivation write-back, carry the canonical `result_id` forward explicitly as `last_result_id`. That is the rerun anchor.
 

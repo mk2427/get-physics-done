@@ -36,6 +36,7 @@ from gpd.adapters.install_utils import (
     MANIFEST_NAME,
     PATCHES_DIR_NAME,
     UPDATE_CACHE_FILENAME,
+    _move_install_dir,
     compile_markdown_for_runtime,
     convert_tool_references_in_body,
     expand_tilde,
@@ -1387,11 +1388,11 @@ def _copy_commands_as_skills(
 
         if skills_dir.exists():
             live_backup = staging_root / f"{skills_dir.name}.backup"
-            skills_dir.rename(live_backup)
-        staged_skills_dir.rename(skills_dir)
+            _move_install_dir(skills_dir, live_backup)
+        _move_install_dir(staged_skills_dir, skills_dir)
     except Exception:
         if live_backup is not None and live_backup.exists() and not skills_dir.exists():
-            live_backup.rename(skills_dir)
+            _move_install_dir(live_backup, skills_dir)
         raise
     finally:
         if live_backup is not None and live_backup.exists():

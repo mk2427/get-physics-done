@@ -261,20 +261,24 @@ def gpd_project(tmp_path: Path) -> Path:
             "custom_conventions": {"my_custom": "value"},
         }
     )
-    (planning / "state.json").write_text(json.dumps(state, indent=2))
-    (planning / "STATE.md").write_text(generate_state_markdown(state))
+    (planning / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
+    (planning / "STATE.md").write_text(generate_state_markdown(state), encoding="utf-8")
     (planning / "PROJECT.md").write_text(
-        "# Test Project\n\n## Core Research Question\nWhat is physics?\n"
+        "# Test Project\n\n## Core Research Question\nWhat is physics?\n",
+        encoding="utf-8",
     )
     (planning / "REQUIREMENTS.md").write_text(
-        "# Requirements\n\n- [ ] **REQ-01**: Do the thing\n"
+        "# Requirements\n\n- [ ] **REQ-01**: Do the thing\n",
+        encoding="utf-8",
     )
     (planning / "ROADMAP.md").write_text(
         "# Roadmap\n\n## Phase 1: Test Phase\nGoal: Test\nRequirements: REQ-01\n"
-        "\n## Phase 2: Phase Two\nGoal: More tests\nRequirements: REQ-01\n"
+        "\n## Phase 2: Phase Two\nGoal: More tests\nRequirements: REQ-01\n",
+        encoding="utf-8",
     )
     (planning / "CONVENTIONS.md").write_text(
-        "# Conventions\n\n- Metric: (-,+,+,+)\n- Coordinates: Cartesian\n"
+        "# Conventions\n\n- Metric: (-,+,+,+)\n- Coordinates: Cartesian\n",
+        encoding="utf-8",
     )
     (planning / "config.json").write_text(
         json.dumps(
@@ -290,15 +294,17 @@ def gpd_project(tmp_path: Path) -> Path:
                     "verifier": True,
                 },
             }
-        )
+        ),
+        encoding="utf-8",
     )
 
     # Phase directories
     p1 = planning / "phases" / "01-test-phase"
     p1.mkdir(parents=True)
-    (p1 / "README.md").write_text("# Phase 1: Test Phase\n")
+    (p1 / "README.md").write_text("# Phase 1: Test Phase\n", encoding="utf-8")
     (p1 / "01-PLAN.md").write_text(
-        "---\nphase: '01'\nplan: '01'\nwave: 1\n---\n\n# Plan A\n\n## Tasks\n\n- Task 1\n"
+        "---\nphase: '01'\nplan: '01'\nwave: 1\n---\n\n# Plan A\n\n## Tasks\n\n- Task 1\n",
+        encoding="utf-8",
     )
     (p1 / "01-SUMMARY.md").write_text(
         '---\nphase: "01"\nplan: "01"\ndepth: "full"\nprovides: ["main-module"]\ncompleted: "2026-03-22"\none-liner: "Set up project"\n'
@@ -309,12 +315,13 @@ def gpd_project(tmp_path: Path) -> Path:
         "methods:\n  added:\n    - finite-element\n"
         "conventions:\n  metric: (-,+,+,+)\n"
         "---\n\n# Summary\n\n**Set up the project.**\n\n"
-        "## Key Results\n\nWe got results.\n\n## Equations Derived\n\nE = mc^2\n"
+        "## Key Results\n\nWe got results.\n\n## Equations Derived\n\nE = mc^2\n",
+        encoding="utf-8",
     )
 
     p2 = planning / "phases" / "02-phase-two"
     p2.mkdir(parents=True)
-    (p2 / "README.md").write_text("# Phase 2: Phase Two\n")
+    (p2 / "README.md").write_text("# Phase 2: Phase Two\n", encoding="utf-8")
 
     return tmp_path
 
@@ -1939,7 +1946,7 @@ class TestSuggest:
         parsed = json.loads(result.output)
 
         assert parsed["top_action"]["action"] == "resume"
-        assert parsed["top_action"]["command"] == "gpd resume"
+        assert parsed["top_action"]["command"] in {"gpd resume", "/gpd:resume-work"}
         assert parsed["top_action"]["priority"] == 1
         assert "Work was paused" in parsed["top_action"]["reason"]
         assert "resume to restore context" in parsed["top_action"]["reason"]

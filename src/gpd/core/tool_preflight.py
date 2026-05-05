@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
 import shutil
@@ -194,9 +195,16 @@ def parse_plan_tool_requirements(raw: object) -> list[PlanToolRequirement]:
 
 def _split_command_argv(command: str) -> tuple[list[str] | None, str | None]:
     try:
-        return shlex.split(command, posix=True) if command else [], None
+        protected = command.replace("\\", "\\\\") if os.name == "nt" else command
+        return shlex.split(protected, posix=True) if protected else [], None
     except ValueError as exc:
         return None, f"could not parse command requirement: {exc}"
+
+
+def _display_probe_path(path: str) -> str:
+    if path.startswith("/"):
+        return path
+    return str(Path(path).resolve(strict=False))
 
 
 def _env_wrapped_argv(argv: list[str]) -> tuple[list[str] | None, str | None]:
@@ -520,7 +528,7 @@ def _probe_tool(requirement: PlanToolRequirement, *, cwd: Path | None = None) ->
             target_issue = _command_target_issue(command, cwd=cwd)
             if target_issue is not None:
                 return False, target_issue, "command", []
-            return True, f"{executable} found at {Path(path).resolve(strict=False)}", "command", []
+            return True, f"{executable} found at {_display_probe_path(path)}", "command", []
         return False, f"{executable} not found on PATH", "command", []
 
     if requirement.tool == "wolfram":
@@ -529,7 +537,7 @@ def _probe_tool(requirement: PlanToolRequirement, *, cwd: Path | None = None) ->
         if path:
             return (
                 True,
-                f"wolframscript found at {Path(path).resolve(strict=False)}",
+                f"wolframscript found at {_display_probe_path(path)}",
                 "wolframscript",
                 warnings,
             )
@@ -560,7 +568,7 @@ def _probe_tool(requirement: PlanToolRequirement, *, cwd: Path | None = None) ->
     path = shutil.which(spec.command)
     warnings = [spec.warning] if spec.warning else []
     if path:
-        return True, f"{spec.command} found at {Path(path).resolve(strict=False)}", spec.provider, warnings
+        return True, f"{spec.command} found at {_display_probe_path(path)}", spec.provider, warnings
     return False, f"{spec.command} not found on PATH", spec.provider, warnings
 
 

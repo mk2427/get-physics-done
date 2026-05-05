@@ -35,7 +35,14 @@ _TEST_PROVIDER = "provider-under-test"
 _TEST_MODEL = "model-under-test"
 
 
+def _mark_gpd_project(project: Path) -> None:
+    gpd_dir = project / "GPD"
+    gpd_dir.mkdir(parents=True, exist_ok=True)
+    (gpd_dir / "state.json").write_text("{}", encoding="utf-8")
+
+
 def _write_current_execution(workspace: Path, payload: dict[str, object]) -> None:
+    _mark_gpd_project(workspace)
     observability = workspace / "GPD" / "observability"
     observability.mkdir(parents=True, exist_ok=True)
     (observability / "current-execution.json").write_text(json.dumps(payload), encoding="utf-8")
@@ -126,7 +133,7 @@ def test_notify_dedupes_repeated_update_notices(tmp_path: Path) -> None:
 
 def test_notify_keeps_update_and_execution_fingerprints_isolated(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
-    (workspace / "GPD").mkdir(parents=True)
+    _mark_gpd_project(workspace)
 
     stderr = io.StringIO()
     update_cache = {
@@ -523,7 +530,7 @@ def test_notify_unknown_runtime_falls_back_to_runtime_neutral_update_command(tmp
 
 def test_notification_state_path_uses_project_layout_observability_root(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
-    (workspace / "GPD").mkdir(parents=True)
+    _mark_gpd_project(workspace)
     nested = workspace / "src" / "notes"
     nested.mkdir(parents=True)
 
@@ -802,7 +809,7 @@ def test_main_passes_workspace_and_project_roots_to_usage_recorder_when_supporte
     project = tmp_path / "project"
     nested = project / "src" / "notes"
     nested.mkdir(parents=True)
-    (project / "GPD").mkdir()
+    _mark_gpd_project(project)
 
     payload = {
         "type": "agent-turn-complete",
@@ -858,11 +865,11 @@ def test_main_expands_tilde_workspace_and_project_dir(tmp_path: Path) -> None:
     project = home / "project"
     nested = project / "src"
     nested.mkdir(parents=True)
-    (project / "GPD").mkdir()
+    _mark_gpd_project(project)
     payload = {"type": "agent-turn-complete", "workspace": {"cwd": "~/project/src", "project_dir": "~/project"}}
 
     with (
-        patch.dict("os.environ", {"HOME": str(home)}),
+        patch.dict("os.environ", {"HOME": str(home), "USERPROFILE": str(home)}),
         patch("sys.stdin", io.StringIO(json.dumps(payload))),
         patch("gpd.hooks.notify._trigger_update_check") as mock_trigger,
         patch("gpd.hooks.notify._check_and_notify_update") as mock_notify,
@@ -1520,7 +1527,7 @@ def test_emit_execution_notification_for_paused_state_without_resume_file_is_con
 def test_emit_execution_notification_dedupes_concurrent_resume_state(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    (workspace / "GPD").mkdir()
+    _mark_gpd_project(workspace)
     barrier = threading.Barrier(2)
 
     class _SlowStderr:

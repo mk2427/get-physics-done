@@ -22,6 +22,8 @@ from gpd.mcp.servers.state_server import (
     validate_state,
 )
 
+FAKE_PROJECT_DIR = str((Path.cwd() / "__fake_mcp_project__").resolve(strict=False))
+
 
 async def _tool_names() -> list[str]:
     tools = await mcp.list_tools()
@@ -63,13 +65,13 @@ def test_state_server_tools_reject_non_absolute_project_dirs(tool_fn, kwargs: di
 @pytest.mark.parametrize(
     ("tool_fn", "patch_target", "kwargs"),
     [
-        (get_state, "gpd.mcp.servers.state_server.load_state_json", {"project_dir": "/tmp/fake"}),
-        (get_phase_info, "gpd.core.phases.find_phase", {"project_dir": "/tmp/fake", "phase": "01"}),
-        (advance_plan, "gpd.mcp.servers.state_server.state_advance_plan", {"project_dir": "/tmp/fake"}),
-        (get_progress, "gpd.mcp.servers.state_server.progress_render", {"project_dir": "/tmp/fake"}),
-        (validate_state, "gpd.mcp.servers.state_server.state_validate", {"project_dir": "/tmp/fake"}),
-        (run_health_check, "gpd.mcp.servers.state_server.run_health", {"project_dir": "/tmp/fake", "fix": False}),
-        (get_config, "gpd.mcp.servers.state_server.load_config", {"project_dir": "/tmp/fake"}),
+        (get_state, "gpd.mcp.servers.state_server.load_state_json", {"project_dir": FAKE_PROJECT_DIR}),
+        (get_phase_info, "gpd.core.phases.find_phase", {"project_dir": FAKE_PROJECT_DIR, "phase": "01"}),
+        (advance_plan, "gpd.mcp.servers.state_server.state_advance_plan", {"project_dir": FAKE_PROJECT_DIR}),
+        (get_progress, "gpd.mcp.servers.state_server.progress_render", {"project_dir": FAKE_PROJECT_DIR}),
+        (validate_state, "gpd.mcp.servers.state_server.state_validate", {"project_dir": FAKE_PROJECT_DIR}),
+        (run_health_check, "gpd.mcp.servers.state_server.run_health", {"project_dir": FAKE_PROJECT_DIR, "fix": False}),
+        (get_config, "gpd.mcp.servers.state_server.load_config", {"project_dir": FAKE_PROJECT_DIR}),
     ],
 )
 @pytest.mark.parametrize("error_factory", [lambda: GPDError("boom"), lambda: OSError("missing"), lambda: ValueError("bad")])

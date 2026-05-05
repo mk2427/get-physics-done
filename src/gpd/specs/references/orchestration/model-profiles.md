@@ -45,6 +45,14 @@ If no override is configured for the active runtime, `gpd resolve-model` returns
 | gpd-experiment-designer  | tier-2        | tier-1      | tier-2        | tier-2   | tier-3          |
 | gpd-notation-coordinator | tier-2        | tier-3      | tier-3        | tier-2   | tier-2          |
 | gpd-adversarial-critic   | tier-1        | tier-1      | tier-1        | tier-1   | tier-1          |
+| gpd-paper-digester       | tier-1        | tier-2      | tier-2        | tier-1   | tier-1          |
+| gpd-knowledge-critic     | tier-1        | tier-1      | tier-1        | tier-1   | tier-1          |
+| gpd-cluster-auditor      | tier-1        | tier-1      | tier-2        | tier-1   | tier-2          |
+| gpd-meta-auditor         | tier-1        | tier-2      | tier-2        | tier-1   | tier-2          |
+| gpd-eqnref-integrator    | tier-1        | tier-2      | tier-2        | tier-1   | tier-2          |
+| gpd-assertion-digester   | tier-1        | tier-1      | tier-2        | tier-1   | tier-2          |
+| gpd-finding-adjudicator  | tier-1        | tier-1      | tier-1        | tier-1   | tier-1          |
+| gpd-sympy-calculator     | tier-1        | tier-1      | tier-2        | tier-1   | tier-2          |
 
 ## Profile Philosophy
 

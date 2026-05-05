@@ -1,0 +1,12 @@
+{
+  "A-001": {
+    "path": "GPD/assertions/A-001-kazakov-zheng-mmle.md",
+    "decision": "retained",
+    "reason": "Recovered as pre-cleanup canary/Knowledge Trust artifact; not part of A-003..A-023 polluted duplicate set."
+  },
+  "A-002": {
+    "path": "GPD/assertions/A-002-lin-bfss-virial-eq1.md",
+    "decision": "retained",
+    "reason": "Stable C12 smoke artifact with three review rounds; retained as canonical live max-ID baseline."
+  }
+}

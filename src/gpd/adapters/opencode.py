@@ -27,6 +27,7 @@ from gpd.adapters.install_utils import (
     PATCHES_DIR_NAME,
     UPDATE_CACHE_FILENAME,
     _default_install_target,
+    _move_install_dir,
     _normalize_install_scope_flag,
     _paths_equal,
     compile_markdown_for_runtime,
@@ -805,13 +806,13 @@ def copy_with_path_replacement(
 
         # Swap into place: rename-old-then-rename-new
         if dest_dir.exists():
-            dest_dir.rename(old_dir)
+            _move_install_dir(dest_dir, old_dir)
         try:
-            tmp_dir.rename(dest_dir)
+            _move_install_dir(tmp_dir, dest_dir)
         except OSError:
             # Rename failed — restore old directory
             if old_dir.exists():
-                old_dir.rename(dest_dir)
+                _move_install_dir(old_dir, dest_dir)
             raise
 
         # Swap succeeded — clean up old

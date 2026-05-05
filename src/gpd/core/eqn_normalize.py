@@ -10,7 +10,7 @@ Pipeline (in order, matching brief §3.4.1 steps (a)-(e)):
 (a) Whitespace strip -- remove every Unicode whitespace character and every
     inline-math spacing macro (``\\,``, ``\\!``, ``\\:``, ``\\;``,
     ``\\ `` (backslash-space), ``~``).
-(b) Macro canonicalization via ``pylatexenc.macrospec``:
+(b) Macro canonicalization with conservative LaTeX token rewrites:
       * ``\\dfrac`` / ``\\tfrac`` -> ``\\frac``
       * ``\\left X``, ``\\right X`` -> bare ``X``
       * ``\\mathop{\\rm X}`` -> ``\\mathrm{X}``

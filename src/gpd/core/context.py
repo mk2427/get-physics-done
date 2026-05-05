@@ -1829,9 +1829,17 @@ def _detect_platform(cwd: Path | None = None) -> str:
     resolved_home = Path.home()
     runtime_unknown = "unknown"
     try:
-        from gpd.hooks.runtime_detect import RUNTIME_UNKNOWN, detect_runtime_for_gpd_use
+        from gpd.hooks.runtime_detect import (
+            RUNTIME_UNKNOWN,
+            SOURCE_ENV,
+            detect_runtime_for_gpd_use,
+            resolve_effective_runtime,
+        )
 
         runtime_unknown = RUNTIME_UNKNOWN
+        active = resolve_effective_runtime(cwd=resolved_cwd, home=resolved_home)
+        if active.source == SOURCE_ENV and isinstance(active.runtime, str) and active.runtime != runtime_unknown:
+            return active.runtime
         detected = detect_runtime_for_gpd_use(cwd=resolved_cwd, home=resolved_home)
         if isinstance(detected, str) and detected.strip():
             return detected

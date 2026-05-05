@@ -53,6 +53,8 @@ The shared resume resolver distinguishes canonical continuation authority, conti
 
 The shared resume resolver is canonical-first: `state.json.continuation` wins, the canonical bounded segment and recorded handoff fields define the primary resume target, and the derived execution head only fills compatibility gaps when bounded-segment state is missing. Do not treat a single `.continue-here.md` file or compatibility snapshot as the sole authority.
 
+Do not treat any single `.continue-here.md` file or compatibility snapshot as the sole authority in isolation. The temporary handoff artifact, derived execution head, and recent-project rows are supporting continuity surfaces only. The shared resume-surface resolver owns the canonical candidate kind/origin semantics, and the shared resolver across those layers keeps compatibility mirrors subordinate to the storage authority chain.
+
 **If `state_exists` is true:** Proceed to load_state
 **If `state_exists` is false but `roadmap_exists` or `project_exists` is true:** Offer to reconstruct STATE.md
 **If `planning_exists` is false:** This is a new project - route to gpd:new-project

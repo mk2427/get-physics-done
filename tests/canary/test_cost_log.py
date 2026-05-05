@@ -58,6 +58,7 @@ def test_append_round_trips(tmp_path: Path) -> None:
         [Path("GPD/knowledge/K-002-baz.md")],
         {
             "error_class": "timeout",
+            "failure_details": ["timed out after 1s"],
             "cost_usd": 0.0,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -77,6 +78,7 @@ def test_append_round_trips(tmp_path: Path) -> None:
     assert log[0]["claude_session_id"] == "sess-A"
     assert log[0]["wall_clock_seconds"] == pytest.approx(720.0)
     assert log[1]["error_class"] == "timeout"
+    assert log[1]["failure_details"] == ["timed out after 1s"]
 
 
 # ---------------------------------------------------------------------------
@@ -257,3 +259,74 @@ def test_verify_log_against_manifest_detects_missing_extra_duplicates() -> None:
     assert diff["missing"] == ["C"]
     assert diff["extra"] == ["Z"]
     assert set(diff["duplicates"]) == {"B", "Z"}
+
+
+def test_schema_v2_fields_and_assertion_error_round_trip(tmp_path: Path) -> None:
+    log_path = tmp_path / "cost.jsonl"
+    cost_log.append_paper_cost(
+        "X",
+        [Path("K-001.md")],
+        {
+            "error_class": "assertion_error",
+            "dispatch_ids": ["knowledge-X", "assertion-X-K.1"],
+            "assertion_paths": ["A-003-test.md"],
+            "review_paths": ["reviews/R1.md"],
+            "n_assertions": 1,
+            "n_assertion_errors": 1,
+        },
+        log_path=log_path,
+    )
+    entry = cost_log.read_entries(log_path)[0]
+    assert entry["schema_version"] == 2
+    assert entry["dispatch_ids"] == ["knowledge-X", "assertion-X-K.1"]
+    assert entry["review_paths"] == ["reviews/R1.md"]
+    assert entry["n_assertion_errors"] == 1
+
+
+def test_path_partition_validation_rejects_mixed_artifacts() -> None:
+    with pytest.raises(ValueError, match="kdoc_paths"):
+        cost_log._build_entry("X", [Path("A-001-wrong.md")], {"error_class": "ok"})
+    with pytest.raises(ValueError, match="assertion_paths"):
+        cost_log._build_entry(
+            "X",
+            [Path("K-001-ok.md")],
+            {"error_class": "ok", "assertion_paths": ["K-002-wrong.md"]},
+        )
+
+
+def test_produced_files_and_run_failures_helpers() -> None:
+    entries = [
+        {
+            "schema_version": 2,
+            "arxiv_id": "ok",
+            "error_class": "ok",
+            "kdoc_paths": ["K-001.md"],
+            "assertion_paths": ["A-001.md"],
+            "n_assertion_errors": 0,
+        },
+        {
+            "schema_version": 2,
+            "arxiv_id": "bad",
+            "error_class": "assertion_error",
+            "kdoc_paths": ["K-002.md"],
+            "assertion_paths": [],
+            "n_assertion_errors": 1,
+        },
+        {
+            "schema_version": 2,
+            "arxiv_id": "empty",
+            "error_class": "ok",
+            "kdoc_paths": [],
+            "assertion_paths": [],
+            "n_assertion_errors": 0,
+        },
+    ]
+    assert [p.as_posix() for p in cost_log.produced_files_from_entries(entries)] == [
+        "K-001.md",
+        "A-001.md",
+    ]
+    failures = cost_log.run_failures_from_entries(entries)
+    assert [f["reason"] for f in failures] == [
+        "non_ok_dispatch",
+        "ok_empty_produced_files",
+    ]

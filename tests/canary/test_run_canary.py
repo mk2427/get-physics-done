@@ -15,7 +15,9 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
+import subprocess
 import sys
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -103,6 +105,30 @@ def test_dry_run_does_not_dispatch(
     )
     assert rc_code == 0
     assert call_count == {"k": 0, "a": 0}
+
+
+def test_run_canary_script_dry_run_imports_when_executed_as_file(
+    tmp_path: Path,
+) -> None:
+    manifest = _write_minimal_manifest(tmp_path, ["1810.03378"])
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(_CANARY_DIR / "run_canary.py"),
+            "--manifest",
+            str(manifest),
+            "--dry-run",
+            "--non-interactive",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "--dry-run" in result.stderr
 
 
 # ---------------------------------------------------------------------------
@@ -229,22 +255,23 @@ def test_ok_dispatch_with_files_written_succeeds(
     rc = _import_run_canary()
     manifest = _write_minimal_manifest(tmp_path, ["1810.03378"])
 
-    # Build a fake kdoc on disk so per-equation enumeration works (the
-    # driver reads the file's frontmatter for kdoc_id and uses
-    # extract_equations_from_kdoc on it).
-    kdoc_path = tmp_path / "K-001-foo.md"
-    kdoc_path.write_text(
-        "---\nkdoc_id: K-001-foo\nstatus: Stable\n---\n\n"
-        "(K.1) $E = mc^2$\n"
-        "(K.2) $F = ma$\n",
-        encoding="utf-8",
-    )
-
     def _stub_k(*args, **kwargs):
+        kdoc_path = kwargs["knowledge_dir"] / "K-001-foo.md"
+        kdoc_path.write_text(
+            "---\nkdoc_id: K-001-foo\nstatus: Stable\n"
+            "source_arxiv_id: 1810.03378\n"
+            "source_filename: sources/1810.03378.tex\n"
+            f"source_path_sha256: {'0' * 64}\n"
+            "---\n\n"
+            "(K.1) $E = mc^2$\n"
+            "(K.2) $F = ma$\n",
+            encoding="utf-8",
+        )
         return {
             "error_class": "ok",
             "status": "ok",
-            "files_written": [str(kdoc_path)],
+            "kdoc_paths": [str(kdoc_path)],
+            "assertion_paths": [],
             "cost_usd": 0.5,
             "input_tokens": 100,
             "output_tokens": 50,
@@ -254,7 +281,7 @@ def test_ok_dispatch_with_files_written_succeeds(
         return {
             "error_class": "ok",
             "status": "ok",
-            "files_written": [
+            "assertion_paths": [
                 f"GPD/assertions/A-{equation_id.replace('.', '-')}.md"
             ],
             "cost_usd": 0.2,
@@ -265,6 +292,7 @@ def test_ok_dispatch_with_files_written_succeeds(
     import dispatch_skill  # noqa: E402
     monkeypatch.setattr(dispatch_skill, "dispatch_digest_knowledge", _stub_k)
     monkeypatch.setattr(dispatch_skill, "dispatch_digest_assertion", _stub_a)
+    monkeypatch.setattr(rc, "run_criteria", lambda **kwargs: [])
 
     rc_code = rc.main(
         [
@@ -276,6 +304,175 @@ def test_ok_dispatch_with_files_written_succeeds(
         ]
     )
     assert rc_code == 0
+
+
+def test_process_one_paper_uses_manifest_tex_sha256_for_source_identity(
+    tmp_path: Path,
+) -> None:
+    rc = _import_run_canary()
+    sources_dir = tmp_path / "sources"
+    sources_dir.mkdir()
+    tex_path = sources_dir / "paper.tex"
+    tex_path.write_bytes(b"line one\r\nline two\r\n")
+    expected_tex_hash = hashlib.sha256(b"line one\nline two\n").hexdigest()
+    captured: dict[str, str | None] = {}
+
+    def _stub_k(*args, **kwargs):
+        captured["source_path_sha256"] = kwargs["source_path_sha256"]
+        kwargs["knowledge_dir"].mkdir(parents=True, exist_ok=True)
+        kdoc_path = kwargs["knowledge_dir"] / "K-001-source.md"
+        kdoc_path.write_text(
+            "---\nkdoc_id: K-001-source\nstatus: Stable\n"
+            "source_arxiv_id: X\n"
+            "source_filename: paper.tex\n"
+            f"source_path_sha256: {expected_tex_hash}\n"
+            "---\n\nNo displayed equations.\n",
+            encoding="utf-8",
+        )
+        return {
+            "error_class": "ok",
+            "kdoc_paths": [str(kdoc_path)],
+            "assertion_paths": [],
+        }
+
+    def _stub_a(*args, **kwargs):  # pragma: no cover - no equations extracted
+        raise AssertionError("unexpected assertion dispatch")
+
+    proc = rc._make_process_one_paper(
+        sources_dir=sources_dir,
+        knowledge_dir=tmp_path / "k",
+        assertion_dir=tmp_path / "a",
+        review_dir=tmp_path / "r",
+        canary_run_root=tmp_path / "root",
+        max_budget_usd=8.0,
+        timeout_s=10,
+        model="m",
+        dispatch_knowledge_fn=_stub_k,
+        dispatch_assertion_fn=_stub_a,
+    )
+    outcome = proc(
+        {
+            "arxiv_id": "X",
+            "tex_filename": "paper.tex",
+            "tex_sha256": expected_tex_hash,
+            "sha256": "0" * 64,
+        }
+    )
+
+    assert captured["source_path_sha256"] == expected_tex_hash
+    assert outcome["assertion_results"] == []
+
+
+def test_process_one_paper_rejects_stale_manifest_source_hash(
+    tmp_path: Path,
+) -> None:
+    rc = _import_run_canary()
+    sources_dir = tmp_path / "sources"
+    sources_dir.mkdir()
+    tex_path = sources_dir / "paper.tex"
+    tex_path.write_bytes(b"fresh line\r\n")
+    stale_hash = "b" * 64
+
+    def _stub_k(*args, **kwargs):  # pragma: no cover - must not dispatch
+        raise AssertionError("stale manifest hash should fail before dispatch")
+
+    def _stub_a(*args, **kwargs):  # pragma: no cover - must not dispatch
+        raise AssertionError("unexpected assertion dispatch")
+
+    proc = rc._make_process_one_paper(
+        sources_dir=sources_dir,
+        knowledge_dir=tmp_path / "k",
+        assertion_dir=tmp_path / "a",
+        review_dir=tmp_path / "r",
+        canary_run_root=tmp_path / "root",
+        max_budget_usd=8.0,
+        timeout_s=10,
+        model="m",
+        dispatch_knowledge_fn=_stub_k,
+        dispatch_assertion_fn=_stub_a,
+    )
+    outcome = proc(
+        {
+            "arxiv_id": "X",
+            "tex_filename": "paper.tex",
+            "tex_sha256": stale_hash,
+        }
+    )
+
+    assert outcome["knowledge_result"]["error_class"] == "skill_error"
+    assert "source hash mismatch before dispatch" in outcome["knowledge_result"]["stderr"]
+    assert stale_hash in outcome["knowledge_result"]["stderr"]
+
+
+def test_run_canary_honors_references_dir_env_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    rc = _import_run_canary()
+    override = tmp_path / "local-refs"
+    monkeypatch.setenv("GPD_BFSS_REFERENCES_DIR", str(override))
+
+    assert rc._resolve_sources_dir({"references_dir": "D:/stale/path"}) == override
+
+
+def test_kdoc_ownership_requires_exact_source_filename_and_hash(
+    tmp_path: Path,
+) -> None:
+    rc = _import_run_canary()
+    expected_hash = "a" * 64
+    entry = {
+        "arxiv_id": "2302.04416",
+        "tex_filename": "sources/2302.04416.tex",
+        "tex_sha256": expected_hash,
+    }
+
+    missing_hash = tmp_path / "missing-hash.md"
+    missing_hash.write_text(
+        "---\n"
+        "source_arxiv_id: 2302.04416\n"
+        "source_filename: sources/2302.04416.tex\n"
+        "---\n",
+        encoding="utf-8",
+    )
+    assert "source_path_sha256 frontmatter missing" in (
+        rc._validate_kdoc_ownership(missing_hash, entry) or ""
+    )
+
+    legacy_arxiv_only = tmp_path / "legacy-arxiv-only.md"
+    legacy_arxiv_only.write_text(
+        "---\n"
+        "arxiv_id: 2302.04416\n"
+        "source_filename: sources/2302.04416.tex\n"
+        f"source_path_sha256: {expected_hash}\n"
+        "---\n",
+        encoding="utf-8",
+    )
+    assert "source_arxiv_id frontmatter missing" in (
+        rc._validate_kdoc_ownership(legacy_arxiv_only, entry) or ""
+    )
+
+    basename_only = tmp_path / "basename-only.md"
+    basename_only.write_text(
+        "---\n"
+        "source_arxiv_id: 2302.04416\n"
+        "source_filename: 2302.04416.tex\n"
+        f"source_path_sha256: {expected_hash}\n"
+        "---\n",
+        encoding="utf-8",
+    )
+    assert "source_filename mismatch" in (
+        rc._validate_kdoc_ownership(basename_only, entry) or ""
+    )
+
+    exact = tmp_path / "exact.md"
+    exact.write_text(
+        "---\n"
+        "source_arxiv_id: 2302.04416\n"
+        "source_filename: sources/2302.04416.tex\n"
+        f"source_path_sha256: {expected_hash}\n"
+        "---\n",
+        encoding="utf-8",
+    )
+    assert rc._validate_kdoc_ownership(exact, entry) is None
 
 
 # ---------------------------------------------------------------------------
@@ -329,7 +526,8 @@ def test_per_equation_dispatch_loops_over_extracted_equations(
 
     kdoc_path = tmp_path / "K-007-three-eqs.md"
     kdoc_path.write_text(
-        "---\nkdoc_id: K-007-three-eqs\n---\n\n"
+        "---\nkdoc_id: K-007-three-eqs\nsource_arxiv_id: X\n"
+        "source_filename: x.tex\n---\n\n"
         "(K.1) $a = b$\n"
         "(K.2) $c = d$\n"
         "(K.3) $e = f$\n",
@@ -341,7 +539,8 @@ def test_per_equation_dispatch_loops_over_extracted_equations(
     def _stub_k(*args, **kwargs):
         return {
             "error_class": "ok",
-            "files_written": [str(kdoc_path)],
+            "kdoc_paths": [str(kdoc_path)],
+            "assertion_paths": [],
             "cost_usd": 0.0,
         }
 
@@ -349,7 +548,7 @@ def test_per_equation_dispatch_loops_over_extracted_equations(
         calls.append((kdoc_id, equation_id))
         return {
             "error_class": "ok",
-            "files_written": [f"A-{len(calls):03d}.md"],
+            "assertion_paths": [f"A-{len(calls):03d}.md"],
             "cost_usd": 0.1,
         }
 
@@ -384,7 +583,8 @@ def test_per_equation_dispatch_zero_equations_no_calls(
     rc = _import_run_canary()
     kdoc_path = tmp_path / "K-008-prose-only.md"
     kdoc_path.write_text(
-        "---\nkdoc_id: K-008-prose-only\n---\n\n"
+        "---\nkdoc_id: K-008-prose-only\nsource_arxiv_id: X\n"
+        "source_filename: x.tex\n---\n\n"
         "Just prose, no equations.\n",
         encoding="utf-8",
     )
@@ -392,11 +592,15 @@ def test_per_equation_dispatch_zero_equations_no_calls(
     calls: list = []
 
     def _stub_k(*args, **kwargs):
-        return {"error_class": "ok", "files_written": [str(kdoc_path)]}
+        return {
+            "error_class": "ok",
+            "kdoc_paths": [str(kdoc_path)],
+            "assertion_paths": [],
+        }
 
     def _stub_a(*args, **kwargs):
         calls.append(args)
-        return {"error_class": "ok", "files_written": []}
+        return {"error_class": "ok", "assertion_paths": []}
 
     proc = rc._make_process_one_paper(
         sources_dir=tmp_path,
@@ -424,12 +628,17 @@ def test_per_equation_dispatch_missing_kdoc_id_records_skill_error(
     rc = _import_run_canary()
     kdoc_path = tmp_path / "K-bad-no-frontmatter.md"
     kdoc_path.write_text(
-        "No frontmatter here, no kdoc_id.\n\n(K.1) $x = y$\n",
+        "---\nsource_arxiv_id: X\nsource_filename: x.tex\n---\n\n"
+        "No kdoc_id.\n\n(K.1) $x = y$\n",
         encoding="utf-8",
     )
 
     def _stub_k(*args, **kwargs):
-        return {"error_class": "ok", "files_written": [str(kdoc_path)]}
+        return {
+            "error_class": "ok",
+            "kdoc_paths": [str(kdoc_path)],
+            "assertion_paths": [],
+        }
 
     def _stub_a(*args, **kwargs):  # must NOT be called
         raise AssertionError("dispatch_digest_assertion called with bad kdoc")

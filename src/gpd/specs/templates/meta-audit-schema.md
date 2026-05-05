@@ -132,9 +132,9 @@ Checklist of meta-audit preconditions (all boxes MUST be checked at emit):
       every axis.
 - [ ] §4 aggregate typo list has confidence + source citation for every row.
 - [ ] §5 open questions are tagged with HIGH / MEDIUM / LOW priority.
-- [ ] Did NOT touch `GPD/knowledge/`, `CLAUDE.md`, `AGENTS.md`,
+- [ ] Did NOT touch `GPD/knowledge/`, runtime instruction files,
       `lessons.md`, other reports, `handoff-*.md`, `references/`,
-      `.claude/settings.json`.
+      or runtime settings files.
 - [ ] Did NOT use `gpd-*` subagents (meta-auditor is the top-level agent).
 
 ---

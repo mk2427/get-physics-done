@@ -66,6 +66,7 @@ def _isolate_runtime_detection(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
 def _bootstrap_project(tmp_path: Path) -> Path:
     project = tmp_path / "project"
     (project / "GPD" / "observability").mkdir(parents=True, exist_ok=True)
+    (project / "GPD" / "phases").mkdir(parents=True, exist_ok=True)
     return project
 
 

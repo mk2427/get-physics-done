@@ -81,6 +81,11 @@ the user (do not enter the adversarial loop). The validator runs BEFORE dispatch
 <step name="assign_id">
 Determine the next sequential assertion ID:
 
+If the invocation supplies `assertion_id` or `reserved_assertion_id`, use that
+numeric A-NNN and skip the filesystem scan for the next ID. This is the canary
+mode contract: the orchestrator owns top-level A-NNN allocation. The digester may
+append a slug but must not change the numeric prefix.
+
 ```bash
 ls GPD/assertions/A-*.md 2>/dev/null | sort | tail -1
 ```
@@ -96,6 +101,11 @@ NNN. Sub-assertion IDs within a doc follow `A-NNN.S{k}` (k is 1-indexed).
 
 <step name="produce_draft">
 Spawn `gpd-assertion-digester` to produce `GPD/assertions/A-{NNN}-{slug}.md`.
+
+In canary mode, if `canary_dispatch_root`, `canary_output_root`, or
+`canary_manifest_path` is supplied, write the assertion under the canary output
+root instead of live `GPD/assertions/`, and return the actual path in
+`gpd_return.files_written`.
 
 The digester follows the restated-equation or derived-consequence path based on
 the input kind:

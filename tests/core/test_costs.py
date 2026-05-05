@@ -29,6 +29,7 @@ _GENERIC_MODEL = "model-under-test"
 def _bootstrap_project(tmp_path: Path, name: str = "project") -> Path:
     project = tmp_path / name
     (project / "GPD").mkdir(parents=True, exist_ok=True)
+    (project / "GPD" / "state.json").write_text("{}", encoding="utf-8")
     return project
 
 

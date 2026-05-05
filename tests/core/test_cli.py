@@ -79,6 +79,13 @@ runner = _StableCliRunner()
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
+def _mark_gpd_project(project_root: Path) -> ProjectLayout:
+    layout = ProjectLayout(project_root)
+    layout.gpd.mkdir(parents=True, exist_ok=True)
+    layout.state_json.write_text("{}", encoding="utf-8")
+    return layout
+
+
 def _normalize_cli_output(text: str) -> str:
     return " ".join(_ANSI_ESCAPE_RE.sub("", text).split())
 
@@ -165,7 +172,11 @@ def test_raw_version_subcommand_outputs_json():
 
 def test_entrypoint_reexecs_from_checkout_when_running_outside_checkout(tmp_path: Path, monkeypatch) -> None:
     checkout = _make_checkout(tmp_path, "9.9.9")
-    checkout_python = checkout / ".venv" / "bin" / "python"
+    checkout_python = (
+        checkout / ".venv" / "Scripts" / "python.exe"
+        if os.name == "nt"
+        else checkout / ".venv" / "bin" / "python"
+    )
     checkout_python.parent.mkdir(parents=True)
     checkout_python.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
     managed_cli = tmp_path / "managed" / "site-packages" / "gpd" / "cli.py"
@@ -270,8 +281,7 @@ def test_workflow_presets_surface_lists_catalog() -> None:
 
 def test_integrations_status_reports_effective_project_local_state_and_plan_readiness(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
-    project_root.mkdir()
-    (project_root / "GPD").mkdir()
+    _mark_gpd_project(project_root)
 
     result = runner.invoke(app, ["--cwd", str(project_root), "--raw", "integrations", "status", "wolfram"])
     assert result.exit_code == 0
@@ -290,8 +300,7 @@ def test_integrations_status_reports_effective_project_local_state_and_plan_read
 
 def test_integrations_enable_and_disable_wolfram_persist_project_local_config(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
-    project_root.mkdir()
-    (project_root / "GPD").mkdir()
+    _mark_gpd_project(project_root)
 
     enable_result = runner.invoke(app, ["--cwd", str(project_root), "--raw", "integrations", "enable", "wolfram"])
     assert enable_result.exit_code == 0
@@ -330,8 +339,8 @@ def test_integrations_commands_use_project_root_config_from_nested_workspace(tmp
     project_root = tmp_path / "project"
     nested_workspace = project_root / "notes" / "scratch"
     nested_workspace.mkdir(parents=True)
+    _mark_gpd_project(project_root)
     config_path = project_root / "GPD" / "integrations.json"
-    config_path.parent.mkdir(parents=True)
     config_path.write_text('{"wolfram":{"enabled":false}}', encoding="utf-8")
 
     status_result = runner.invoke(app, ["--cwd", str(nested_workspace), "--raw", "integrations", "status", "wolfram"])
@@ -350,8 +359,8 @@ def test_integrations_commands_use_project_root_config_from_nested_workspace(tmp
 
 
 def test_integrations_status_rejects_legacy_api_key_env_field(tmp_path: Path) -> None:
+    _mark_gpd_project(tmp_path)
     config_path = tmp_path / "GPD" / "integrations.json"
-    config_path.parent.mkdir(parents=True)
     config_path.write_text(
         '{"wolfram":{"enabled":true,"api_key_env":"WOLFRAM_MCP_SERVICE_API_KEY"}}',
         encoding="utf-8",
@@ -375,8 +384,8 @@ def test_integrations_status_fails_closed_for_invalid_project_config(
     raw_config: str,
     expected_error: str,
 ) -> None:
+    _mark_gpd_project(tmp_path)
     config_path = tmp_path / "GPD" / "integrations.json"
-    config_path.parent.mkdir(parents=True)
     config_path.write_text(raw_config, encoding="utf-8")
 
     result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "integrations", "status", "wolfram"])
@@ -388,8 +397,8 @@ def test_integrations_status_fails_closed_for_invalid_project_config(
 
 @pytest.mark.parametrize("command", ("enable", "disable"))
 def test_integrations_toggle_fails_closed_for_invalid_project_config(tmp_path: Path, command: str) -> None:
+    _mark_gpd_project(tmp_path)
     config_path = tmp_path / "GPD" / "integrations.json"
-    config_path.parent.mkdir(parents=True)
     config_path.write_text('{"wolfram":{"enabled":"yes"}}', encoding="utf-8")
     before = config_path.read_text(encoding="utf-8")
 
@@ -630,7 +639,12 @@ def _assert_cost_posture_semantics(output: str) -> None:
     assert _COST_TEST_RUNTIME in output
     assert "review" in output
     assert "runtime defaults" in output
-    assert "tier-1=13, tier-2=10, tier-3=1" in output
+    expected_mix = ", ".join(
+        f"{tier}={count}"
+        for tier, count in _profile_tier_mix("review").items()
+        if count > 0
+    )
+    assert expected_mix in output
     assert "Advisory only; counts profile-to-tier assignments" in output
     assert "set-tier-models" in output
 
@@ -1194,10 +1208,10 @@ def test_resume_recent_raw_surfaces_machine_local_recent_projects(
     parsed = json.loads(result.output)
 
     assert parsed["count"] == 2
-    assert parsed["projects"][0]["project_root"] == str(resumable_root)
+    assert parsed["projects"][0]["project_root"] == resumable_root.as_posix()
     assert parsed["projects"][0]["resumable"] is True
     assert parsed["projects"][0]["status"] == "resumable"
-    assert parsed["projects"][1]["project_root"] == str(unavailable_root)
+    assert parsed["projects"][1]["project_root"] == unavailable_root.as_posix()
     assert parsed["projects"][1]["available"] is False
     assert parsed["projects"][1]["status"] == "unavailable"
 
@@ -1279,7 +1293,7 @@ def test_resume_recent_raw_downgrades_missing_handoff_rows_to_non_resumable(
     parsed = json.loads(result.output)
 
     assert parsed["count"] == 1
-    assert parsed["projects"][0]["project_root"] == str(project_root)
+    assert parsed["projects"][0]["project_root"] == project_root.as_posix()
     assert parsed["projects"][0]["resume_file_available"] is False
     assert parsed["projects"][0]["resume_file_reason"] == "resume file missing"
     assert parsed["projects"][0]["resumable"] is False
@@ -2374,7 +2388,7 @@ def test_validate_project_contract_uses_ancestor_project_root_from_nested_cwd(
 ) -> None:
     project_root = tmp_path / "project"
     nested_cwd = project_root / "workspace" / "nested"
-    (project_root / "GPD").mkdir(parents=True, exist_ok=True)
+    _mark_gpd_project(project_root)
     nested_cwd.mkdir(parents=True, exist_ok=True)
     contract_path = nested_cwd / "contract.json"
     contract_path.write_text((FIXTURES_DIR / "project_contract.json").read_text(encoding="utf-8"), encoding="utf-8")
@@ -2605,7 +2619,7 @@ def test_state_load(mock_load):
 def test_state_load_uses_ancestor_project_root_from_nested_cwd(mock_load, tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     nested_cwd = project_root / "workspace" / "nested"
-    (project_root / "GPD").mkdir(parents=True, exist_ok=True)
+    _mark_gpd_project(project_root)
     nested_cwd.mkdir(parents=True, exist_ok=True)
 
     mock_result = MagicMock()
@@ -2704,7 +2718,7 @@ def test_state_set_project_contract_uses_ancestor_project_root_from_nested_cwd(
 ) -> None:
     project_root = tmp_path / "project"
     nested_cwd = project_root / "workspace" / "nested"
-    (project_root / "GPD").mkdir(parents=True, exist_ok=True)
+    _mark_gpd_project(project_root)
     nested_cwd.mkdir(parents=True, exist_ok=True)
     contract_path = nested_cwd / "contract.json"
     contract_path.write_text((FIXTURES_DIR / "project_contract.json").read_text(encoding="utf-8"), encoding="utf-8")
@@ -3105,7 +3119,7 @@ def test_pre_commit_check_recurses_into_directory_inputs(tmp_path: Path) -> None
     payload = json.loads(result.output)
     assert payload["passed"] is True
     assert payload["files_checked"] == 1
-    assert payload["details"][0]["file"].endswith("docs/state.md")
+    assert payload["details"][0]["file"].replace("\\", "/").endswith("docs/state.md")
 
 
 def test_pre_commit_check_fails_for_unreadable_inputs(tmp_path: Path) -> None:
@@ -5338,7 +5352,7 @@ def test_cli_invocation_does_not_write_observability_files_without_explicit_even
 def test_suggest_uses_ancestor_project_root_from_nested_cwd(mock_suggest, tmp_path: Path, monkeypatch) -> None:
     project_root = tmp_path / "project"
     nested_cwd = project_root / "work" / "nested"
-    (project_root / "GPD").mkdir(parents=True, exist_ok=True)
+    _mark_gpd_project(project_root)
     nested_cwd.mkdir(parents=True, exist_ok=True)
 
     mock_result = MagicMock()
@@ -5356,7 +5370,7 @@ def test_suggest_uses_ancestor_project_root_from_nested_cwd(mock_suggest, tmp_pa
 def test_suggest_uses_ancestor_project_root_from_cleared_cwd(mock_suggest, tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     nested_cwd = project_root / "work" / "nested"
-    (project_root / "GPD").mkdir(parents=True, exist_ok=True)
+    _mark_gpd_project(project_root)
     nested_cwd.mkdir(parents=True, exist_ok=True)
     nested_cwd.rmdir()
 
@@ -5376,7 +5390,7 @@ def test_suggest_forwards_limit_and_serializes_raw_output_from_nested_cwd(
 ) -> None:
     project_root = tmp_path / "project"
     nested_cwd = project_root / "work" / "nested"
-    (project_root / "GPD").mkdir(parents=True, exist_ok=True)
+    _mark_gpd_project(project_root)
     nested_cwd.mkdir(parents=True, exist_ok=True)
 
     payload = {
@@ -5489,10 +5503,12 @@ def test_init_resume(mock_init):
     mock_init.assert_called_once()
 
 
-def test_paper_build_uses_default_config_surface(tmp_path: Path):
+def test_paper_build_uses_default_config_surface(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("TEMP", str(tmp_path.parent))
+    monkeypatch.setenv("TMP", str(tmp_path.parent))
     nested_cwd = tmp_path / "notes"
     nested_cwd.mkdir()
-    (tmp_path / "GPD").mkdir()
+    _mark_gpd_project(tmp_path)
     paper_dir = tmp_path / "paper"
     paper_dir.mkdir()
     (paper_dir / "PAPER-CONFIG.json").write_text(
@@ -5817,7 +5833,7 @@ def test_paper_build_preserves_explicit_relative_config_path_from_nested_cwd(tmp
     project_root = tmp_path / "project"
     nested_cwd = project_root / "notes"
     nested_cwd.mkdir(parents=True)
-    (project_root / "GPD").mkdir()
+    _mark_gpd_project(project_root)
     paper_dir = project_root / "paper"
     paper_dir.mkdir()
     (paper_dir / "PAPER-CONFIG.json").write_text(
@@ -5967,7 +5983,7 @@ def test_resolve_review_preflight_manuscript_directory_uses_manifest_declared_en
     )
 
     assert resolved == manuscript
-    assert detail.endswith("/paper resolved to " + str(manuscript))
+    assert detail.endswith("/paper resolved to " + manuscript.as_posix())
 
 
 def test_resolve_review_preflight_manuscript_reports_ambiguous_project_state(tmp_path: Path) -> None:
@@ -6147,7 +6163,7 @@ def test_resolve_review_preflight_manuscript_uses_workspace_cwd_for_relative_tar
     )
 
     assert resolved == manuscript
-    assert detail == f"{manuscript} present"
+    assert detail == f"{manuscript.as_posix()} present"
 
 
 def test_resolve_review_preflight_manuscript_nested_supported_directory_resolves_via_supported_root(
@@ -6189,7 +6205,7 @@ def test_resolve_review_preflight_manuscript_nested_supported_directory_resolves
     )
 
     assert resolved == manuscript
-    assert detail.endswith("/paper/sections resolved to " + str(manuscript))
+    assert detail.endswith("/paper/sections resolved to " + manuscript.as_posix())
 
 
 def test_resolve_review_preflight_manuscript_rejects_nested_supported_directory_when_entrypoint_lives_elsewhere(
@@ -6385,10 +6401,15 @@ def test_paper_build_without_bibliography_does_not_import_pybtex(tmp_path: Path,
     assert mock_build.await_args.kwargs["bib_data"] is None
 
 
-def test_paper_build_auto_discovers_single_literature_citation_sources_sidecar(tmp_path: Path) -> None:
+def test_paper_build_auto_discovers_single_literature_citation_sources_sidecar(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TEMP", str(tmp_path.parent))
+    monkeypatch.setenv("TMP", str(tmp_path.parent))
     nested_cwd = tmp_path / "notes"
     nested_cwd.mkdir()
-    (tmp_path / "GPD").mkdir()
+    _mark_gpd_project(tmp_path)
     paper_dir = tmp_path / "paper"
     paper_dir.mkdir()
     (paper_dir / "PAPER-CONFIG.json").write_text(
@@ -6595,7 +6616,12 @@ def test_paper_build_rejects_citation_sidecar_entries_without_title(tmp_path: Pa
     assert "title must be a non-empty string" in result.output
 
 
-def test_paper_build_surfaces_toolchain_failure_details(tmp_path: Path) -> None:
+def test_paper_build_surfaces_toolchain_failure_details(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TEMP", str(tmp_path.parent))
+    monkeypatch.setenv("TMP", str(tmp_path.parent))
     paper_dir = tmp_path / "paper"
     paper_dir.mkdir()
     (paper_dir / "PAPER-CONFIG.json").write_text(

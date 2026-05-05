@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -31,6 +32,17 @@ from scripts.repo_graph_contract import (
 )
 
 
+def _rmtree_retry(path: Path) -> None:
+    for attempt in range(5):
+        try:
+            shutil.rmtree(path)
+            return
+        except PermissionError:
+            if attempt == 4:
+                raise
+            time.sleep(0.1)
+
+
 @contextmanager
 def _transient_root_artifacts():
     sentinel_root = "__gpd_repo_graph_test__"
@@ -55,7 +67,7 @@ def _transient_root_artifacts():
         for root_path, root_existed in created_paths:
             sentinel_dir = root_path / sentinel_root
             if sentinel_dir.exists():
-                shutil.rmtree(sentinel_dir)
+                _rmtree_retry(sentinel_dir)
             if not root_existed and root_path.exists() and not any(root_path.iterdir()):
                 root_path.rmdir()
 

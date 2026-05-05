@@ -23,6 +23,27 @@ Determine input type from the argument:
 
 </step>
 
+<step name="canary_output_contract">
+If the invocation includes `canary_dispatch_root`, `canary_output_root`, or
+`canary_manifest_path`, canary mode is active. In canary mode:
+
+- Write the knowledge artifact under the supplied canary dispatch/output root,
+  not live `GPD/knowledge/`, `GPD/assertions/`, or `GPD/reviews/`.
+- Treat live `GPD/knowledge/` instructions elsewhere in this workflow as the
+  legacy non-canary default.
+- Emit frontmatter `source_arxiv_id`, `source_filename`, and
+  `source_path_sha256` from orchestrator-supplied values when present.
+- These ownership fields are exact-copy hard requirements. Preserve the
+  manifest value of `source_filename`, including subdirectory prefixes such as
+  `sources/<id>.tex`; never replace it with only the basename. When
+  `source_path_sha256` is supplied, do not emit `null`, an empty value, or a
+  fallback PDF hash. If exact ownership cannot be emitted, return
+  `gpd_return.status: blocked` and do not write the kdoc.
+- Return the actual emitted path in `gpd_return.files_written`.
+- If `canary_manifest_path` is supplied, write a JSON manifest listing emitted
+  kdoc/review paths.
+</step>
+
 <step name="check_existing">
 Check if `GPD/knowledge/` exists and scan for existing knowledge docs on this topic:
 

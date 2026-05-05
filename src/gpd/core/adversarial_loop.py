@@ -30,7 +30,7 @@ Plan 005 commit c0 (S3 dedup-key redesign):
   ``_finding_dedup_key``; whitespace-normalized sha256 over the FULL
   body supersedes the pre-S3 ``(location, equation_body[:60])`` key
   that collapsed every body-less finding into a single
-  ``("", "")`` bucket (Codex r1 S3).
+  ``("", "")`` bucket (plan-005 r1 S3).
 """
 
 from __future__ import annotations
@@ -839,7 +839,7 @@ def run_parallel_critics(
 
     focus_areas = ["equations", "conventions", "completeness"]  # noqa: F841
     # Record the three parallel invocations in the loop state — actual
-    # parallelism is handled by the orchestrator (Claude Code spawns sub-agents).
+    # parallelism is handled by the active runtime's orchestrator.
     # This function returns the merged schema so next_loop_state is unchanged.
     # NOTE: real parallel dispatch happens at orchestrator level; this function
     # documents the intended invocation contract and performs the merge.
@@ -878,7 +878,7 @@ def merge_parallel_findings(
     (``thin_overview`` + ``missing_physical_picture`` + ``missing_convention``
     all at the doc level). The three-tuple key above always distinguishes
     them because ``kind_slug`` is required for knowledge-critic findings
-    (Codex r1 S3).
+    (plan-005 r1 S3).
 
     Pure function: no I/O, no side effects. Safe to call from any context.
     """

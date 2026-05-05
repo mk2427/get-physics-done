@@ -4,7 +4,7 @@ How GPD project state travels between machines, survives session interruptions, 
 
 ## Continuation Surface Contract
 
-The continuation architecture separates execution provenance from bounded-resume authority. `gpd --raw resume` reads `state.json.continuation` first, then fills gaps from lineage and recovery surfaces. Canonical continuation fields define the public resume vocabulary: `active_resume_kind`, `active_resume_origin`, `active_resume_pointer`, `active_bounded_segment`, `derived_execution_head`, `active_resume_result`, `continuity_handoff_file`, `recorded_continuity_handoff_file`, `missing_continuity_handoff_file`, and `resume_candidates`. Compatibility-only cues stay backend-only, compatibility-only intake fields stay internal, and `.continue-here.md` plus `DERIVATION-STATE.md` are projections rather than authorities.
+The continuation architecture separates execution provenance from bounded-resume authority. `state.json.continuation` is the durable authority. `gpd --raw resume` reads `state.json.continuation` first, then fills gaps from lineage and recovery surfaces. Canonical continuation fields define the public resume vocabulary: `active_resume_kind`, `active_resume_origin`, `active_resume_pointer`, `active_bounded_segment`, `derived_execution_head`, `active_resume_result`, `continuity_handoff_file`, `recorded_continuity_handoff_file`, `missing_continuity_handoff_file`, and `resume_candidates`. Compatibility-only cues stay backend-only, and Compatibility-only intake fields stay internal. `.continue-here.md` plus `DERIVATION-STATE.md` are projections rather than authorities.
 
 | Surface | Current Role | Authority |
 |---------|--------------|-----------|
@@ -16,6 +16,8 @@ The continuation architecture separates execution provenance from bounded-resume
 | Derived execution head / `GPD/observability/current-execution.json` | Compatibility mirror showing the latest execution snapshot | Advisory unless canonical `continuation.bounded_segment` is absent |
 
 The shared resolver is `gpd --raw resume`. No single handoff file, lineage row, or execution snapshot is, by itself, the canonical continuation state. Canonical state in `state.json.continuation` wins first; the canonical bounded segment and recorded handoff fields define the primary resume target; and the derived execution head only fills compatibility gaps in the recovery ladder. Legacy `session` fields can still backfill missing canonical continuity during explicit migration or recovery, but they never outrank canonical continuation once that state exists.
+
+The canonical public resume surface centers on `active_resume_kind`, `active_resume_origin`, `active_resume_pointer`, and the related public resume fields. The shared resume-surface resolver owns the canonical candidate kind/origin semantics; backend-only compatibility inputs and other backend-only inputs can inform recovery, but they do not become public resume fields.
 
 ## What Is Portable
 

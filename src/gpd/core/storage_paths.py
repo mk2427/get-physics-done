@@ -184,8 +184,8 @@ class ProjectStorageLayout:
 
     def _display_path(self, path: Path) -> str:
         if _is_relative_to(path, self.root):
-            return str(path.relative_to(self.root))
-        return str(path)
+            return path.relative_to(self.root).as_posix()
+        return path.as_posix()
 
     def _is_project_local_scratch_path(self, path: Path) -> bool:
         if not _is_relative_to(path, self.root) or _is_relative_to(path, self.gpd):
@@ -195,16 +195,17 @@ class ProjectStorageLayout:
 
     def _internal_storage_violation(self, path: Path) -> str | None:
         rel = path.relative_to(self.root)
+        rel_text = rel.as_posix()
         suffix = path.suffix.lower()
 
         if any(segment in _SUSPICIOUS_INTERNAL_SEGMENTS for segment in rel.parts):
-            return f"Suspicious durable-artifact path under {self.gpd}: {rel}"
+            return f"Suspicious durable-artifact path under {self.gpd}: {rel_text}"
 
         if (
             (_is_relative_to(path, self.gpd / "phases") or _is_relative_to(path, self.gpd / "paper"))
             and suffix in _SUSPICIOUS_DURABLE_SUFFIXES
         ):
-            return f"Artifact-like file stored under internal metadata directories: {rel}"
+            return f"Artifact-like file stored under internal metadata directories: {rel_text}"
 
         return None
 
@@ -316,7 +317,7 @@ class ProjectStorageLayout:
                 f"got {resolved}."
             )
         elif classification == StorageClass.PROJECT_LOCAL_OTHER:
-            preferred_label = ", ".join(str(path.relative_to(self.root)) for path in preferred_dirs) or "named durable roots"
+            preferred_label = ", ".join(path.relative_to(self.root).as_posix() for path in preferred_dirs) or "named durable roots"
             warnings.append(
                 f"Output is in a custom project directory; prefer {preferred_label} for discoverability, got {resolved}."
             )
@@ -326,7 +327,7 @@ class ProjectStorageLayout:
                 f"got {resolved} ({classification})."
             )
         elif preferred_dirs and not any(_is_relative_to(resolved, parent) for parent in preferred_dirs):
-            preferred_label = ", ".join(str(path.relative_to(self.root)) for path in preferred_dirs)
+            preferred_label = ", ".join(path.relative_to(self.root).as_posix() for path in preferred_dirs)
             warnings.append(f"Expected output under one of {preferred_label}, got {resolved}.")
         elif kind is not None and not _is_relative_to(resolved, self.output_dir(kind)):
             warnings.append(f"Expected a {kind.value} output under {self.output_dir(kind)}, got {resolved}.")
@@ -348,10 +349,11 @@ class ProjectStorageLayout:
                 if not path.is_file():
                     continue
                 rel = path.relative_to(self.root)
+                rel_text = rel.as_posix()
                 suffix = path.suffix.lower()
 
                 if _is_relative_to(path, self.scratch_dir) and suffix not in _SCRATCH_TEMP_SUFFIXES:
-                    warnings.append(f"Scratch file should not be treated as durable output: {rel}")
+                    warnings.append(f"Scratch file should not be treated as durable output: {rel_text}")
                     continue
 
                 violation = self._internal_storage_violation(path)
@@ -365,6 +367,8 @@ class ProjectStorageLayout:
                 continue
             if path.suffix.lower() in _SCRATCH_TEMP_SUFFIXES:
                 continue
-            warnings.append(f"Project scratch directory should not hold final outputs: {path.relative_to(self.root)}")
+            warnings.append(
+                f"Project scratch directory should not hold final outputs: {path.relative_to(self.root).as_posix()}"
+            )
 
         return tuple(dict.fromkeys(warnings))

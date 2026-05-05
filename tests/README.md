@@ -621,13 +621,13 @@ flowchart TD
 - `src/gpd/agents/gpd-planner.md -> src/gpd/specs/templates/planner-subagent-prompt.md`
   `include`
 
-- `src/gpd/agents/{gpd-adversarial-critic,gpd-assertion-digester,gpd-bibliographer,gpd-consistency-checker,gpd-debugger,gpd-executor,gpd-experiment-designer,gpd-finding-adjudicator,gpd-knowledge-critic,gpd-literature-reviewer,gpd-notation-coordinator,gpd-paper-digester,gpd-paper-writer,gpd-phase-researcher,gpd-plan-checker,gpd-planner,gpd-project-researcher,gpd-referee,gpd-research-synthesizer,gpd-roadmapper,gpd-research-mapper,gpd-sympy-calculator,gpd-verifier}.md -> src/gpd/specs/references/shared/shared-protocols.md`
+- `src/gpd/agents/{gpd-adversarial-critic,gpd-assertion-digester,gpd-bibliographer,gpd-cluster-auditor,gpd-consistency-checker,gpd-debugger,gpd-eqnref-integrator,gpd-executor,gpd-experiment-designer,gpd-finding-adjudicator,gpd-knowledge-critic,gpd-literature-reviewer,gpd-meta-auditor,gpd-notation-coordinator,gpd-paper-digester,gpd-paper-writer,gpd-phase-researcher,gpd-plan-checker,gpd-planner,gpd-project-researcher,gpd-referee,gpd-research-synthesizer,gpd-roadmapper,gpd-research-mapper,gpd-sympy-calculator,gpd-verifier}.md -> src/gpd/specs/references/shared/shared-protocols.md`
   `include`
 
 - `src/gpd/agents/{gpd-review-reader,gpd-review-literature,gpd-review-math,gpd-check-proof,gpd-review-physics,gpd-review-significance}.md -> src/gpd/specs/references/shared/shared-protocols.md`
   `include`
 
-- `src/gpd/agents/{gpd-adversarial-critic,gpd-assertion-digester,gpd-bibliographer,gpd-consistency-checker,gpd-debugger,gpd-executor,gpd-experiment-designer,gpd-explainer,gpd-finding-adjudicator,gpd-knowledge-critic,gpd-literature-reviewer,gpd-notation-coordinator,gpd-paper-digester,gpd-paper-writer,gpd-phase-researcher,gpd-plan-checker,gpd-planner,gpd-project-researcher,gpd-referee,gpd-research-synthesizer,gpd-roadmapper,gpd-research-mapper,gpd-sympy-calculator}.md -> src/gpd/specs/references/orchestration/agent-infrastructure.md`
+- `src/gpd/agents/{gpd-adversarial-critic,gpd-assertion-digester,gpd-bibliographer,gpd-cluster-auditor,gpd-consistency-checker,gpd-debugger,gpd-eqnref-integrator,gpd-executor,gpd-experiment-designer,gpd-explainer,gpd-finding-adjudicator,gpd-knowledge-critic,gpd-literature-reviewer,gpd-meta-auditor,gpd-notation-coordinator,gpd-paper-digester,gpd-paper-writer,gpd-phase-researcher,gpd-plan-checker,gpd-planner,gpd-project-researcher,gpd-referee,gpd-research-synthesizer,gpd-roadmapper,gpd-research-mapper,gpd-sympy-calculator}.md -> src/gpd/specs/references/orchestration/agent-infrastructure.md`
   `include`
 
 - `src/gpd/agents/{gpd-review-reader,gpd-review-literature,gpd-check-proof,gpd-review-significance}.md -> src/gpd/specs/references/orchestration/agent-infrastructure.md`
