@@ -12,6 +12,21 @@ from pydantic import BaseModel, Field
 from pydantic import ValidationError as PydanticValidationError
 
 from gpd.contracts import (
+    _PLAN_GROUNDING_TEXT_BLOCKER_PATTERNS as _SHARED_PLAN_GROUNDING_TEXT_BLOCKER_PATTERNS,
+)
+from gpd.contracts import (
+    _PLAN_GROUNDING_TEXT_DIRECT_PATTERNS as _SHARED_PLAN_GROUNDING_TEXT_DIRECT_PATTERNS,
+)
+from gpd.contracts import (
+    _PLAN_GROUNDING_TEXT_QUESTION_PATTERNS as _SHARED_PLAN_GROUNDING_TEXT_QUESTION_PATTERNS,
+)
+from gpd.contracts import (
+    _PLAN_GROUNDING_TEXT_SELECTION_PATTERNS as _SHARED_PLAN_GROUNDING_TEXT_SELECTION_PATTERNS,
+)
+from gpd.contracts import (
+    _USER_ASSERTED_ANCHOR_PLACEHOLDER_PATTERNS as _SHARED_USER_ASSERTED_ANCHOR_PLACEHOLDER_PATTERNS,
+)
+from gpd.contracts import (
     CONTRACT_ACCEPTANCE_AUTOMATION_VALUES,
     CONTRACT_ACCEPTANCE_TEST_KIND_VALUES,
     CONTRACT_CLAIM_KIND_VALUES,
@@ -45,11 +60,12 @@ from gpd.contracts import (
 from gpd.contracts import (
     _is_project_artifact_path as _shared_is_project_artifact_path,
 )
+from gpd.contracts import is_placeholder_only_guidance_text as _shared_is_placeholder_only_guidance_text
+from gpd.core.utils import dedupe_preserve_order
 
 __all__ = [
     "ProjectContractValidationResult",
     "is_authoritative_project_contract_schema_finding",
-    "is_defaultable_singleton_project_contract_schema_finding",
     "is_repair_relevant_project_contract_schema_finding",
     "salvage_project_contract",
     "split_project_contract_schema_findings",
@@ -57,47 +73,11 @@ __all__ = [
 ]
 
 
-_ANCHOR_UNKNOWN_DIRECT_PATTERNS = (
-    re.compile(r"\bneed(?:s)? grounding\b"),
-    re.compile(r"\b(?:(?:decisive|benchmark|comparison)\s+)?target not (?:yet )?chosen\b"),
-)
-_ANCHOR_UNKNOWN_BLOCKER_PATTERNS = (
-    re.compile(r"\bunknown\b"),
-    re.compile(r"\bundecided\b"),
-    re.compile(r"\bunclear\b"),
-    re.compile(r"\bmissing\b"),
-    re.compile(r"\bnot (?:yet )?established\b"),
-    re.compile(r"\bnot (?:yet )?selected\b"),
-    re.compile(r"\bstill to identify\b"),
-    re.compile(r"\btbd\b"),
-    re.compile(r"\bto be determined\b"),
-    re.compile(r"\bmust establish\b"),
-    re.compile(r"\bestablish later\b"),
-    re.compile(r"\bno\b.+\byet\b"),
-)
-_ANCHOR_UNKNOWN_QUESTION_PATTERNS = (
-    re.compile(r"^\s*(?:which|what)\b"),
-    re.compile(r"\?$"),
-)
-_ANCHOR_UNKNOWN_SELECTION_PATTERNS = (
-    re.compile(r"\bserve as\b"),
-    re.compile(r"\btreat as\b"),
-    re.compile(r"\buse as\b"),
-    re.compile(r"\bchoose\b"),
-    re.compile(r"\bselect\b"),
-    re.compile(r"\bpick\b"),
-    re.compile(r"\bdecisive\b"),
-)
-_USER_ASSERTED_ANCHOR_PLACEHOLDER_PATTERNS = (
-    re.compile(r"^\s*(?:tbd|todo|unknown|unclear|none|n/?a|placeholder)\s*$"),
-    re.compile(r"\btbd\b"),
-    re.compile(r"\btodo\b"),
-    re.compile(r"\bplaceholder\b"),
-    re.compile(r"\bto be determined\b"),
-)
-_PLACEHOLDER_ONLY_GUIDANCE_PATTERNS = (
-    re.compile(r"^\s*(?:tbd|todo|unknown|unclear|none|n/?a|placeholder)\s*$"),
-)
+_ANCHOR_UNKNOWN_DIRECT_PATTERNS = _SHARED_PLAN_GROUNDING_TEXT_DIRECT_PATTERNS
+_ANCHOR_UNKNOWN_BLOCKER_PATTERNS = _SHARED_PLAN_GROUNDING_TEXT_BLOCKER_PATTERNS
+_ANCHOR_UNKNOWN_QUESTION_PATTERNS = _SHARED_PLAN_GROUNDING_TEXT_QUESTION_PATTERNS
+_ANCHOR_UNKNOWN_SELECTION_PATTERNS = _SHARED_PLAN_GROUNDING_TEXT_SELECTION_PATTERNS
+_USER_ASSERTED_ANCHOR_PLACEHOLDER_PATTERNS = _SHARED_USER_ASSERTED_ANCHOR_PLACEHOLDER_PATTERNS
 _RECOVERABLE_SCHEMA_WARNING_PATTERNS = (
     re.compile(r"^.+: Extra inputs are not permitted$"),
     re.compile(r"^.+\.\d+ must be a valid list member$"),
@@ -114,10 +94,8 @@ _LOSSY_LIST_NORMALIZATION_WARNING_PATTERNS = (
 _CASE_DRIFT_SCHEMA_WARNING_PATTERNS = (
     re.compile(r"^.+ must use exact canonical value: .+$"),
 )
-_DEFAULTABLE_SINGLETON_SCHEMA_WARNING_PATTERNS = (
-    re.compile(r"^(?:context_intake|uncertainty_markers) must be an object, not .+$"),
-)
 _AUTHORITATIVE_SCALAR_FINDING_PATTERNS = (
+    re.compile(r"^schema_version must be 1$"),
     re.compile(r"^schema_version must be the integer 1$"),
     re.compile(r"^schema_version: Input should be 1$"),
     re.compile(r"^.+\.must_surface must be a boolean$"),
@@ -143,17 +121,6 @@ class ProjectContractValidationResult(BaseModel):
     guidance_signal_count: int = 0
     reference_count: int = 0
     mode: Literal["draft", "approved"] = "draft"
-
-
-def _dedupe_findings(findings: list[str]) -> list[str]:
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for finding in findings:
-        if finding in seen:
-            continue
-        seen.add(finding)
-        deduped.append(finding)
-    return deduped
 
 
 def _format_schema_error(error: dict[str, object]) -> str:
@@ -461,7 +428,8 @@ def salvage_project_contract(contract: dict[str, object]) -> tuple[ResearchContr
     errors: list[str] = []
     errors.extend(_collect_literal_case_drift_errors(contract))
     raw_required_section_presence = {
-        field_name: field_name in contract for field_name in ("schema_version", "context_intake", "uncertainty_markers")
+        field_name: field_name in contract
+        for field_name in ("schema_version", "scope", "context_intake", "uncertainty_markers")
     }
     scalar_sanitized = _sanitize_contract_scalars(contract, errors=errors)
     if not isinstance(scalar_sanitized, dict):
@@ -472,7 +440,7 @@ def salvage_project_contract(contract: dict[str, object]) -> tuple[ResearchContr
     _normalize_blank_list_fields(normalized_contract)
 
     missing_required_section_errors: list[str] = []
-    for field_name in ("schema_version", "context_intake", "uncertainty_markers"):
+    for field_name in ("schema_version", "scope", "context_intake", "uncertainty_markers"):
         if field_name not in normalized_contract and not raw_required_section_presence[field_name]:
             missing_required_section_errors.append(_required_project_contract_section_error(field_name))
     if missing_required_section_errors:
@@ -519,15 +487,18 @@ def salvage_project_contract(contract: dict[str, object]) -> tuple[ResearchContr
     normalized_contract["context_intake"] = context_intake
 
     if "approach_policy" in normalized_contract:
+        approach_policy_errors: list[str] = []
         approach_policy, approach_policy_blocked = _salvage_model_mapping(
             normalized_contract.get("approach_policy"),
             path_prefix="approach_policy",
             model=ContractApproachPolicy,
-            errors=errors,
+            errors=approach_policy_errors,
         )
         if approach_policy_blocked or approach_policy is None:
-            return None, errors
-        normalized_contract["approach_policy"] = approach_policy
+            errors.extend(error for error in approach_policy_errors if error not in errors)
+            normalized_contract.pop("approach_policy", None)
+        else:
+            normalized_contract["approach_policy"] = approach_policy
 
     uncertainty_markers, uncertainty_markers_blocked = _salvage_model_mapping(
         normalized_contract.get("uncertainty_markers"),
@@ -562,15 +533,15 @@ def salvage_project_contract(contract: dict[str, object]) -> tuple[ResearchContr
 def split_project_contract_schema_findings(
     errors: list[str],
     *,
-    allow_singleton_defaults: bool = True,
+    allow_case_drift_recovery: bool = True,
 ) -> tuple[list[str], list[str]]:
-    """Partition salvage findings into recoverable warnings and blocking errors."""
+    """Partition salvage findings into recoverable case-drift warnings and blocking errors."""
 
     recoverable: list[str] = []
     blocking: list[str] = []
     recoverable_patterns = _RECOVERABLE_SCHEMA_WARNING_PATTERNS
-    if allow_singleton_defaults:
-        recoverable_patterns += _DEFAULTABLE_SINGLETON_SCHEMA_WARNING_PATTERNS + _CASE_DRIFT_SCHEMA_WARNING_PATTERNS
+    if allow_case_drift_recovery:
+        recoverable_patterns += _CASE_DRIFT_SCHEMA_WARNING_PATTERNS
     for error in errors:
         if any(pattern.fullmatch(error) for pattern in recoverable_patterns):
             recoverable.append(error)
@@ -578,16 +549,11 @@ def split_project_contract_schema_findings(
             blocking.append(error)
     return recoverable, blocking
 
+
 def is_authoritative_project_contract_schema_finding(error: str) -> bool:
     """Return whether one schema finding touches an authoritative scalar field."""
 
     return any(pattern.fullmatch(error) for pattern in _AUTHORITATIVE_SCALAR_FINDING_PATTERNS)
-
-
-def is_defaultable_singleton_project_contract_schema_finding(error: str) -> bool:
-    """Return whether one schema finding is the defaultable-singleton drift class."""
-
-    return any(pattern.fullmatch(error) for pattern in _DEFAULTABLE_SINGLETON_SCHEMA_WARNING_PATTERNS)
 
 
 def is_repair_relevant_project_contract_schema_finding(error: str) -> bool:
@@ -600,7 +566,6 @@ def is_repair_relevant_project_contract_schema_finding(error: str) -> bool:
         for pattern in (
             *_RECOVERABLE_SCHEMA_WARNING_PATTERNS,
             *_LOSSY_LIST_NORMALIZATION_WARNING_PATTERNS,
-            *_DEFAULTABLE_SINGLETON_SCHEMA_WARNING_PATTERNS,
         )
     )
 
@@ -664,7 +629,7 @@ def _collect_list_shape_drift_errors(contract: dict[str, object]) -> list[str]:
     for collection_name, field_names in PROJECT_CONTRACT_COLLECTION_LIST_FIELDS.items():
         _check_collection_item_lists(collection_name, field_names)
 
-    return _dedupe_findings(errors)
+    return dedupe_preserve_order(errors)
 
 
 _LITERAL_CASE_DRIFT_FIELD_PATTERNS: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = (
@@ -788,10 +753,18 @@ def _light_contract_consistency_errors(contract: ResearchContract) -> list[str]:
 def _is_placeholder_only_guidance_text(value: str) -> bool:
     """Return whether *value* is only a placeholder and not actionable guidance."""
 
-    lowered = value.casefold().strip()
-    if not lowered:
-        return True
-    return any(pattern.fullmatch(lowered) for pattern in _PLACEHOLDER_ONLY_GUIDANCE_PATTERNS)
+    return _shared_is_placeholder_only_guidance_text(value)
+
+
+def _unscoped_artifact_path_can_escape_project(value: str) -> bool:
+    stripped = value.strip()
+    candidate_path = Path(stripped).expanduser()
+    return (
+        candidate_path.is_absolute()
+        or stripped.startswith(("/", "\\"))
+        or stripped.startswith("~")
+        or ".." in candidate_path.parts
+    )
 
 
 def _is_concrete_text_grounding(
@@ -804,15 +777,21 @@ def _is_concrete_text_grounding(
     lowered = value.casefold().strip()
     if not lowered:
         return False
-    if any(pattern.search(lowered) for pattern in _ANCHOR_UNKNOWN_DIRECT_PATTERNS):
-        return False
+    if project_root is None and _shared_is_project_artifact_path(value, project_root=None):
+        if _unscoped_artifact_path_can_escape_project(value):
+            return False
     if any(
         _shared_is_concrete_reference_locator(value, reference_kind=reference_kind, project_root=project_root)
         for reference_kind in ("paper", "other", "dataset", "prior_artifact", "spec")
     ):
         return True
     if _shared_is_project_artifact_path(value, project_root=project_root):
+        if project_root is None:
+            if _unscoped_artifact_path_can_escape_project(value):
+                return False
         return True
+    if any(pattern.search(lowered) for pattern in _ANCHOR_UNKNOWN_DIRECT_PATTERNS):
+        return False
     if any(pattern.search(lowered) for pattern in _USER_ASSERTED_ANCHOR_PLACEHOLDER_PATTERNS):
         return False
     if any(pattern.search(lowered) for pattern in _ANCHOR_UNKNOWN_BLOCKER_PATTERNS):
@@ -847,15 +826,28 @@ def _has_concrete_must_surface_reference(
     contract: ResearchContract,
     *,
     project_root: Path | None = None,
+    require_existing_project_artifacts: bool = False,
 ) -> bool:
     """Return whether the contract includes a concrete must_surface reference."""
 
     for reference in contract.references:
-        if reference.must_surface and _shared_is_concrete_reference_locator(
+        if not reference.must_surface:
+            continue
+        if project_root is None and _shared_is_project_artifact_path(reference.locator, project_root=None):
+            locator_path = Path(reference.locator.strip()).expanduser()
+            if locator_path.is_absolute() or ".." in locator_path.parts:
+                continue
+        if not _shared_is_concrete_reference_locator(
             reference.locator,
             reference_kind=reference.kind,
             project_root=project_root,
         ):
+            continue
+        if not require_existing_project_artifacts:
+            return True
+        if not _shared_is_project_artifact_path(reference.locator, project_root=None):
+            return True
+        if project_root is not None and _shared_is_project_artifact_path(reference.locator, project_root=project_root):
             return True
     return False
 
@@ -893,7 +885,11 @@ def _has_approved_grounding_signal(
 
     return any(
         (
-            _has_concrete_must_surface_reference(contract, project_root=project_root),
+            _has_concrete_must_surface_reference(
+                contract,
+                project_root=project_root,
+                require_existing_project_artifacts=True,
+            ),
             _has_concrete_grounding_entries(
                 contract.context_intake.must_include_prior_outputs,
                 field_name="must_include_prior_outputs",
@@ -1081,23 +1077,38 @@ def validate_project_contract(
 
     salvage_result = parse_project_contract_data_salvage(contract_payload)
     parsed = salvage_result.contract
-    schema_warnings = _dedupe_findings(list(salvage_result.recoverable_errors))
-    schema_errors = _dedupe_findings(list(salvage_result.blocking_errors))
+    schema_warnings = dedupe_preserve_order(salvage_result.recoverable_errors)
+    schema_errors = dedupe_preserve_order(salvage_result.blocking_errors)
     schema_version_error = _project_contract_schema_version_missing_error(contract_payload)
     if schema_version_error is not None:
-        schema_errors = _dedupe_findings([schema_version_error, *schema_errors])
+        schema_errors = dedupe_preserve_order([schema_version_error, *schema_errors])
     if parsed is None:
         return ProjectContractValidationResult(
             valid=False,
             errors=schema_errors or ["project contract could not be normalized"],
+            warnings=schema_warnings,
             mode=mode,
         )
-    errors: list[str] = list(schema_errors)
-    warnings: list[str] = list(schema_warnings)
 
     question = parsed.scope.question.strip()
     decisive_target_count = len(parsed.observables) + len(parsed.claims) + len(parsed.deliverables)
     guidance_signal_count = sum(_guidance_signal_flags(parsed, project_root=project_root).values())
+    reference_count = len(parsed.references)
+
+    if schema_errors:
+        return ProjectContractValidationResult(
+            valid=False,
+            errors=schema_errors,
+            warnings=schema_warnings,
+            question=question or None,
+            decisive_target_count=decisive_target_count,
+            guidance_signal_count=guidance_signal_count,
+            reference_count=reference_count,
+            mode=mode,
+        )
+
+    errors: list[str] = []
+    warnings: list[str] = list(schema_warnings)
 
     if not question:
         errors.append("scope.question is required")
@@ -1111,8 +1122,19 @@ def validate_project_contract(
         errors.append("uncertainty_markers.disconfirming_observations must identify what would force a rethink")
 
     errors.extend(_light_contract_consistency_errors(parsed))
+
+    deliverable_ids = {deliverable.id for deliverable in parsed.deliverables}
+    for claim in parsed.claims:
+        for proof_deliverable_id in claim.proof_deliverables:
+            if proof_deliverable_id not in deliverable_ids:
+                errors.append(f"claim {claim.id} references unknown proof deliverable {proof_deliverable_id}")
+
     warnings.extend(_context_intake_guidance_warnings(parsed, project_root=project_root))
-    warnings.extend(_must_surface_locator_warnings(parsed, project_root=project_root))
+    must_surface_locator_warnings = _must_surface_locator_warnings(parsed, project_root=project_root)
+    if mode == "approved":
+        errors.extend(must_surface_locator_warnings)
+    else:
+        warnings.extend(must_surface_locator_warnings)
 
     has_non_reference_grounding = _has_non_reference_grounding_signal(parsed, project_root=project_root)
 
@@ -1142,11 +1164,11 @@ def validate_project_contract(
 
     return ProjectContractValidationResult(
         valid=not errors,
-        errors=_dedupe_findings(errors),
-        warnings=_dedupe_findings(warnings),
+        errors=dedupe_preserve_order(errors),
+        warnings=dedupe_preserve_order(warnings),
         question=question or None,
         decisive_target_count=decisive_target_count,
         guidance_signal_count=guidance_signal_count,
-        reference_count=len(parsed.references),
+        reference_count=reference_count,
         mode=mode,
     )

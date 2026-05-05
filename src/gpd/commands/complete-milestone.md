@@ -15,7 +15,7 @@ allowed-tools:
 <!-- Allowed-tools are runtime-specific. Other platforms may use different tool interfaces. -->
 
 <objective>
-Mark research milestone {{version}} complete, archive to milestones/, and update ROADMAP.md and REQUIREMENTS.md.
+Mark research milestone {version} complete, archive to milestones/, and update ROADMAP.md and REQUIREMENTS.md.
 
 Purpose: Create a historical record of completed research (e.g., "analytical derivation complete" or "numerical validation done"), archive milestone artifacts (roadmap + requirements), and prepare for the next stage of investigation.
 Output: Milestone archived (roadmap + requirements), PROJECT.md evolved, git tagged.
@@ -25,6 +25,7 @@ Output: Milestone archived (roadmap + requirements), PROJECT.md evolved, git tag
 **Load these files NOW (before proceeding):**
 
 - @{GPD_INSTALL_DIR}/workflows/complete-milestone.md (main workflow)
+- @{GPD_INSTALL_DIR}/templates/milestone.md (milestone template)
 - @{GPD_INSTALL_DIR}/templates/milestone-archive.md (archive template)
   </execution_context>
 
@@ -37,7 +38,7 @@ Output: Milestone archived (roadmap + requirements), PROJECT.md evolved, git tag
 
 **User input:**
 
-- Version: {{version}} (e.g., "1.0", "1.1", "2.0")
+- Version: {version} (e.g., "1.0", "1.1", "2.0")
   </context>
 
 <process>
@@ -48,7 +49,7 @@ If `--dry-run` flag is present, show what would be archived and deleted (milesto
 
 0. **Check for audit:**
 
-   - Look for `GPD/v{{version}}-MILESTONE-AUDIT.md`
+   - Look for `GPD/v{version}-MILESTONE-AUDIT.md`
    - If missing or stale: recommend `gpd:audit-milestone` first
    - If audit status is `gaps_found`: recommend `gpd:plan-milestone-gaps` first
    - If audit status is `passed`: proceed to step 1
@@ -56,7 +57,7 @@ If `--dry-run` flag is present, show what would be archived and deleted (milesto
    ```markdown
    ## Pre-flight Check
 
-   {If no v{{version}}-MILESTONE-AUDIT.md:}
+   {If no v{version}-MILESTONE-AUDIT.md:}
    No milestone audit found. Run `gpd:audit-milestone` first to verify
    research question coverage, derivation completeness, and cross-phase consistency.
 
@@ -90,14 +91,14 @@ If `--dry-run` flag is present, show what would be archived and deleted (milesto
 
 4. **Archive milestone:**
 
-   - Create `GPD/milestones/v{{version}}-ROADMAP.md`
+   - Create `GPD/milestones/v{version}-ROADMAP.md`
    - Extract full phase details from ROADMAP.md
    - Fill milestone-archive.md template
    - Update ROADMAP.md to one-line summary with link
 
 5. **Archive requirements:**
 
-   - Create `GPD/milestones/v{{version}}-REQUIREMENTS.md`
+   - Create `GPD/milestones/v{version}-REQUIREMENTS.md`
    - Mark all requirements for this milestone as complete (checkboxes checked)
    - Note requirement outcomes (validated, adjusted, deferred, ruled out by physics)
    - Delete `GPD/REQUIREMENTS.md` (fresh one created for next milestone)
@@ -120,8 +121,8 @@ If `--dry-run` flag is present, show what would be archived and deleted (milesto
    Note: MILESTONES.md is CREATED by `gpd milestone complete` during this workflow. It does not need to exist beforehand.
 
    - Stage: MILESTONES.md, PROJECT.md, ROADMAP.md, STATE.md, archive files
-   - Commit: `chore: archive v{{version}} research milestone`
-   - Tag: `git tag -a v{{version}} -m "[milestone summary]"`
+   - Commit: `chore: archive v{version} research milestone`
+   - Tag: `git tag -a v{version} -m "[milestone summary]"`
    - Ask about pushing tag
 
 8. **Offer next steps:**
@@ -131,13 +132,13 @@ If `--dry-run` flag is present, show what would be archived and deleted (milesto
 
 <success_criteria>
 
-- Milestone archived to `GPD/milestones/v{{version}}-ROADMAP.md`
-- Requirements archived to `GPD/milestones/v{{version}}-REQUIREMENTS.md`
+- Milestone archived to `GPD/milestones/v{version}-ROADMAP.md`
+- Requirements archived to `GPD/milestones/v{version}-REQUIREMENTS.md`
 - `GPD/REQUIREMENTS.md` deleted (fresh for next milestone)
 - ROADMAP.md collapsed to one-line entry
 - PROJECT.md updated with current state of research
 - Pattern promotion reviewed (INSIGHTS.md checked for global library candidates)
-- Git tag v{{version}} created
+- Git tag v{version} created
 - Commit successful
 - User knows next steps (including need for fresh requirements)
   </success_criteria>

@@ -1,0 +1,24 @@
+# BFSS Canary Report — {run_timestamp}
+
+**Status**: {overall_status}
+**Budget used**: {budget_used} / {budget_cap} tokens ({budget_pct}%)
+**Papers processed**: {papers_processed} / 16
+
+## Six Structural Criteria (brief §7)
+
+| # | Criterion | Status | Notes |
+|---|-----------|--------|-------|
+| 1 | Coverage | {c1_status} | {c1_notes} |
+| 2 | Consequence Closure | {c2_status} | {c2_notes} |
+| 3 | Typo+Axis Recovery | {c3_status} | {c3_notes} |
+| 4 | No Hallucination | {c4_status} | {c4_notes} |
+| 5 | Adversarial Convergence | {c5_status} | {c5_notes} |
+| 6 | Traceability | {c6_status} | {c6_notes} |
+
+## Per-Paper Log
+
+{per_paper_log}
+
+## Next Steps
+
+{next_steps}

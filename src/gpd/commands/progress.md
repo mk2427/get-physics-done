@@ -13,14 +13,10 @@ allowed-tools:
   - find_files
 ---
 
-<!-- Tool names and @ includes are platform-specific. The installer translates paths for your runtime. -->
-<!-- Allowed-tools are runtime-specific. Other platforms may use different tool interfaces. -->
-
 <objective>
-Check physics research progress, summarize recent work and what's ahead, then intelligently route to the next action — either executing an existing plan or creating the next one.
+Check physics research progress, summarize recent work and what's ahead, then route to the next action.
 
-Provides situational awareness before continuing research work.
-Use `--brief` when returning and you only need a quick orientation snapshot, or `--reconcile` when state may have drifted from disk reality.
+Use `--brief` for a quick orientation snapshot, or `--reconcile` when disk state may have drifted.
 </objective>
 
 <execution_context>
@@ -32,23 +28,22 @@ Use `--brief` when returning and you only need a quick orientation snapshot, or 
 
 Check `$ARGUMENTS` for flags:
 
-- **`--brief`**: Show compact 3-line status (phase, plan, progress bar + last result + next command), then STOP. Do not show the full report.
-- **`--reconcile`**: Compare STATE.md against disk artifacts and fix discrepancies. See workflow for details.
-- **Default (no flag)**: Show full progress report with routing to next action.
+- **`--brief`**: Show a 3-line status, then stop.
+- **`--reconcile`**: Compare `STATE.md` against disk artifacts and fix discrepancies.
+- **Default (no flag)**: Show the full progress report and route to the next action.
 - **`--full`**: Same as default, plus detailed per-phase artifact listings and system health checks.
 
 **CRITICAL: First, read the full workflow file using the file_read tool:**
-Read the file at {GPD_INSTALL_DIR}/workflows/progress.md — this contains the complete step-by-step instructions. Do NOT improvise. Follow the workflow file exactly.
+Read {GPD_INSTALL_DIR}/workflows/progress.md first and follow it exactly.
 
-Execute the workflow end-to-end.
-Preserve all routing logic (Routes A through F) and edge case handling.
+Execute the workflow end-to-end and preserve all routing logic (Routes A through F) and edge cases.
 
 ## Step 1: Init Context
 
 **Load progress context (with file contents to avoid redundant reads):**
 
 ```bash
-INIT=$(gpd init progress --include state,roadmap,project,config)
+INIT=$(gpd --raw init progress --include state,roadmap,project,config)
 ```
 
 Extract from init JSON: `project_exists`, `roadmap_exists`, `state_exists`, `phases`, `current_phase`, `next_phase`, `milestone_version`, `completed_count`, `phase_count`, `paused_at`.
@@ -123,7 +118,7 @@ Use this instead of manually reading/parsing ROADMAP.md.
 - Find the 2-3 most recent SUMMARY.md files
 - Use `summary-extract` for efficient parsing:
   ```bash
-  gpd summary-extract <path> --field one_liner
+  gpd --raw summary-extract <path> --field one_liner
   ```
 - This shows "what we've been working on" (e.g., derivations completed, numerical results obtained, validations passed)
 
@@ -134,7 +129,7 @@ Use this instead of manually reading/parsing ROADMAP.md.
 - Use `current_phase` and `next_phase` from roadmap analyze
 - Use phase-level `has_context` and `has_research` flags from analyze
 - Note `paused_at` if work was paused (from init context)
-- Count pending tasks: use `gpd init todos`
+- Count pending tasks: use `gpd --raw init todos`
 - Check for active debug sessions: `ls GPD/debug/*.md 2>/dev/null | grep -v resolved | wc -l`
 
 ## Step 6: Report

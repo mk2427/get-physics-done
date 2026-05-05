@@ -17,6 +17,7 @@ import anyio
 import pytest
 
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "stage0"
+FAKE_PROJECT_DIR = str((Path.cwd() / "__fake_mcp_project__").resolve(strict=False))
 
 
 def _load_project_contract_fixture() -> dict[str, object]:
@@ -1225,12 +1226,14 @@ class TestSkillsServer:
         assert result["skills"][0]["name"] == "gpd-execute-phase"
 
     def test_list_skills_empty_category(self):
+        from gpd import registry as content_registry
         from gpd.mcp.servers.skills_server import list_skills
 
         result = list_skills(category="nonexistent")
-        assert result["count"] == 0
-        assert result["skills"] == []
-        assert "categories" in result
+        assert result == {
+            "error": f"category must be one of: {', '.join(content_registry.skill_categories())}",
+            "schema_version": 1,
+        }
 
     def test_get_skill_found(self):
         from gpd.mcp.servers.skills_server import get_skill
@@ -1284,8 +1287,9 @@ class TestSkillsServer:
         assert "Review Ledger Schema" in schema_documents["review-ledger-schema.md"]["body"]
         assert "referee-decision-schema.md" in schema_documents
         assert "Referee Decision Schema" in schema_documents["referee-decision-schema.md"]["body"]
-        assert "review-ledger-schema.md" in contract_documents
-        assert "schema_documents and contract_documents already include" in result["loading_hint"]
+        assert "review-ledger-schema.md" not in contract_documents
+        assert "schema_documents mirror loaded schema markdown bodies" in result["loading_hint"]
+        assert "contract_documents mirror the remaining contract markdown bodies" in result["loading_hint"]
         assert result["content_authority"] == "canonical"
         assert result["structured_metadata_authority"] == {
             "content": "canonical",
@@ -1300,6 +1304,7 @@ class TestSkillsServer:
         assert result["project_reentry_capable"] is False
         assert result["review_contract"] is not None
         assert result["review_contract"]["review_mode"] == "publication"
+        assert "required_state" not in result["review_contract"]
         assert result["review_contract"]["conditional_requirements"] == [
             {
                 "when": "theorem-bearing claims are present",
@@ -1315,7 +1320,6 @@ class TestSkillsServer:
         assert "review-contract:" not in result["content"]
         assert all(not entry["path"].startswith("/") for entry in result["schema_documents"])
         assert all(not entry["path"].startswith("/") for entry in result["contract_documents"])
-
 
     def test_get_skill_resume_work_surfaces_project_reentry_metadata(self):
         from gpd.mcp.servers.skills_server import get_skill
@@ -1361,8 +1365,16 @@ class TestSkillsServer:
         agent = registry.get_agent("gpd-debugger")
         # Agent-backed entries remain part of the canonical MCP skill index.
         assert result["name"] == "gpd-debugger"
+        assert result["content"] == agent.system_prompt
         assert "Primary debugger agent" in result["content"]
-        assert "## Agent Policy" in result["content"]
+        assert "## Agent Requirements" in result["content"]
+        assert result["content"].count("## Agent Requirements") == 1
+        assert "## Agent Policy" not in result["content"]
+        assert result["structured_metadata_authority"] == {
+            "content": "canonical",
+            "allowed_tools": "mirrored",
+            "agent_policy": "mirrored",
+        }
         assert "commit_authority" in result["content"]
         assert "artifact_write_authority" in result["content"]
         assert "shared_state_authority" in result["content"]
@@ -1374,6 +1386,20 @@ class TestSkillsServer:
             "shared_state_authority": agent.shared_state_authority,
             "tools": agent.tools,
         }
+
+    def test_get_skill_loading_hint_only_claims_schema_documents_when_loaded(self):
+        from gpd.mcp.servers.skills_server import get_skill
+
+        result = get_skill("gpd-slides")
+
+        assert "error" not in result
+        assert result["reference_count"] > 0
+        assert result["schema_documents"] == []
+        assert result["contract_documents"] == []
+        assert "See `referenced_files` for external markdown dependencies." in result["loading_hint"]
+        assert "schema_documents and contract_documents mirror loaded schema and contract markdown bodies." not in result[
+            "loading_hint"
+        ]
 
     def test_get_skill_canonicalizes_runtime_command_examples(self):
         from gpd.mcp.servers.skills_server import get_skill
@@ -1649,7 +1675,7 @@ class TestStateServer:
                 ),
             ),
         ):
-            result = load_state_json(Path("/fake/project"))
+            result = load_state_json(Path(FAKE_PROJECT_DIR))
 
         assert result is not None
         assert "session" not in result
@@ -1671,7 +1697,7 @@ class TestStateServer:
         }
 
         with patch("gpd.mcp.servers.state_server.load_state_json", return_value=mock_state):
-            result = get_state("/fake/project")
+            result = get_state(FAKE_PROJECT_DIR)
         assert "position" in result
         assert result["position"]["current_phase"] == "01"
         assert result["project_contract_load_info"]["status"] == "loaded"
@@ -1709,7 +1735,7 @@ class TestStateServer:
         from gpd.mcp.servers.state_server import get_state
 
         with patch("gpd.mcp.servers.state_server.load_state_json", return_value=None):
-            result = get_state("/fake/project")
+            result = get_state(FAKE_PROJECT_DIR)
         assert "error" in result
 
     def test_get_state_gpd_error(self):
@@ -1717,21 +1743,21 @@ class TestStateServer:
         from gpd.mcp.servers.state_server import get_state
 
         with patch("gpd.mcp.servers.state_server.load_state_json", side_effect=GPDError("boom")):
-            result = get_state("/fake/project")
+            result = get_state(FAKE_PROJECT_DIR)
         assert result == {"error": "boom", "schema_version": 1}
 
     def test_get_state_os_error(self):
         from gpd.mcp.servers.state_server import get_state
 
         with patch("gpd.mcp.servers.state_server.load_state_json", side_effect=OSError("permission denied")):
-            result = get_state("/fake/project")
+            result = get_state(FAKE_PROJECT_DIR)
         assert result == {"error": "permission denied", "schema_version": 1}
 
     def test_get_state_value_error(self):
         from gpd.mcp.servers.state_server import get_state
 
         with patch("gpd.mcp.servers.state_server.load_state_json", side_effect=ValueError("bad json")):
-            result = get_state("/fake/project")
+            result = get_state(FAKE_PROJECT_DIR)
         assert result == {"error": "bad json", "schema_version": 1}
 
     def test_get_phase_info_gpd_error(self):
@@ -1739,14 +1765,14 @@ class TestStateServer:
         from gpd.mcp.servers.state_server import get_phase_info
 
         with patch("gpd.core.phases.find_phase", side_effect=GPDError("phase read failed")):
-            result = get_phase_info("/fake/project", "01")
+            result = get_phase_info(FAKE_PROJECT_DIR, "01")
         assert result == {"error": "phase read failed", "schema_version": 1}
 
     def test_get_phase_info_os_error(self):
         from gpd.mcp.servers.state_server import get_phase_info
 
         with patch("gpd.core.phases.find_phase", side_effect=OSError("disk error")):
-            result = get_phase_info("/fake/project", "01")
+            result = get_phase_info(FAKE_PROJECT_DIR, "01")
         assert result == {"error": "disk error", "schema_version": 1}
 
     def test_get_progress_gpd_error(self):
@@ -1754,14 +1780,14 @@ class TestStateServer:
         from gpd.mcp.servers.state_server import get_progress
 
         with patch("gpd.mcp.servers.state_server.progress_render", side_effect=GPDError("no state")):
-            result = get_progress("/fake/project")
+            result = get_progress(FAKE_PROJECT_DIR)
         assert result == {"error": "no state", "schema_version": 1}
 
     def test_get_progress_os_error(self):
         from gpd.mcp.servers.state_server import get_progress
 
         with patch("gpd.mcp.servers.state_server.progress_render", side_effect=OSError("read only")):
-            result = get_progress("/fake/project")
+            result = get_progress(FAKE_PROJECT_DIR)
         assert result == {"error": "read only", "schema_version": 1}
 
     def test_run_health_check_gpd_error(self):
@@ -1769,14 +1795,14 @@ class TestStateServer:
         from gpd.mcp.servers.state_server import run_health_check
 
         with patch("gpd.mcp.servers.state_server.run_health", side_effect=GPDError("health broke")):
-            result = run_health_check("/fake/project")
+            result = run_health_check(FAKE_PROJECT_DIR)
         assert result == {"error": "health broke", "schema_version": 1}
 
     def test_run_health_check_os_error(self):
         from gpd.mcp.servers.state_server import run_health_check
 
         with patch("gpd.mcp.servers.state_server.run_health", side_effect=OSError("no access")):
-            result = run_health_check("/fake/project")
+            result = run_health_check(FAKE_PROJECT_DIR)
         assert result == {"error": "no access", "schema_version": 1}
 
     def test_get_config_gpd_error(self):
@@ -1784,21 +1810,21 @@ class TestStateServer:
         from gpd.mcp.servers.state_server import get_config
 
         with patch("gpd.mcp.servers.state_server.load_config", side_effect=GPDError("config missing")):
-            result = get_config("/fake/project")
+            result = get_config(FAKE_PROJECT_DIR)
         assert result == {"error": "config missing", "schema_version": 1}
 
     def test_get_config_os_error(self):
         from gpd.mcp.servers.state_server import get_config
 
         with patch("gpd.mcp.servers.state_server.load_config", side_effect=OSError("not found")):
-            result = get_config("/fake/project")
+            result = get_config(FAKE_PROJECT_DIR)
         assert result == {"error": "not found", "schema_version": 1}
 
     def test_get_config_value_error(self):
         from gpd.mcp.servers.state_server import get_config
 
         with patch("gpd.mcp.servers.state_server.load_config", side_effect=ValueError("invalid toml")):
-            result = get_config("/fake/project")
+            result = get_config(FAKE_PROJECT_DIR)
         assert result == {"error": "invalid toml", "schema_version": 1}
 
     def test_get_phase_info_found(self):
@@ -1814,7 +1840,7 @@ class TestStateServer:
         mock_info.incomplete_plans = ["plan-03.md"]
 
         with patch("gpd.core.phases.find_phase", return_value=mock_info):
-            result = get_phase_info("/fake/project", "01")
+            result = get_phase_info(FAKE_PROJECT_DIR, "01")
         assert result["phase_number"] == "01"
         assert result["plan_count"] == 3
         assert result["summary_count"] == 2
@@ -1824,7 +1850,7 @@ class TestStateServer:
         from gpd.mcp.servers.state_server import get_phase_info
 
         with patch("gpd.core.phases.find_phase", return_value=None):
-            result = get_phase_info("/fake/project", "99")
+            result = get_phase_info(FAKE_PROJECT_DIR, "99")
         assert "error" in result
 
     def test_advance_plan(self):
@@ -1834,7 +1860,7 @@ class TestStateServer:
         mock_result.model_dump.return_value = {"advanced": True, "new_plan": 2}
 
         with patch("gpd.mcp.servers.state_server.state_advance_plan", return_value=mock_result):
-            result = advance_plan("/fake/project")
+            result = advance_plan(FAKE_PROJECT_DIR)
         assert result["advanced"] is True
 
     def test_get_progress(self):
@@ -1844,7 +1870,7 @@ class TestStateServer:
         mock_result.model_dump.return_value = {"milestone_version": "v1.0", "milestone_name": "Test", "percent": 50}
 
         with patch("gpd.mcp.servers.state_server.progress_render", return_value=mock_result):
-            result = get_progress("/fake/project")
+            result = get_progress(FAKE_PROJECT_DIR)
         assert result["percent"] == 50
 
     def test_validate_state(self):
@@ -1854,7 +1880,7 @@ class TestStateServer:
         mock_result.model_dump.return_value = {"valid": True, "issues": [], "warnings": []}
 
         with patch("gpd.mcp.servers.state_server.state_validate", return_value=mock_result):
-            result = validate_state("/fake/project")
+            result = validate_state(FAKE_PROJECT_DIR)
         assert result["valid"] is True
 
     def test_run_health_check(self):
@@ -1868,7 +1894,7 @@ class TestStateServer:
         }
 
         with patch("gpd.mcp.servers.state_server.run_health", return_value=mock_report):
-            result = run_health_check("/fake/project")
+            result = run_health_check(FAKE_PROJECT_DIR)
         assert result["passed"] == 10
 
     def test_run_health_check_with_fix(self):
@@ -1878,7 +1904,7 @@ class TestStateServer:
         mock_report.model_dump.return_value = {"passed": 11, "failed": 0, "fixes_applied": 1}
 
         with patch("gpd.mcp.servers.state_server.run_health", return_value=mock_report) as mock_fn:
-            result = run_health_check("/fake/project", fix=True)
+            result = run_health_check(FAKE_PROJECT_DIR, fix=True)
         mock_fn.assert_called_once_with(ANY, fix=True)
         assert result["fixes_applied"] == 1
 
@@ -1889,7 +1915,7 @@ class TestStateServer:
         mock_config.model_dump.return_value = {"model_profile": "deep-theory", "autonomy": "balanced"}
 
         with patch("gpd.mcp.servers.state_server.load_config", return_value=mock_config):
-            result = get_config("/fake/project")
+            result = get_config(FAKE_PROJECT_DIR)
         assert result["model_profile"] == "deep-theory"
 
 

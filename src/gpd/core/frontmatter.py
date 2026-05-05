@@ -21,19 +21,18 @@ from pydantic import ValidationError as PydanticValidationError
 
 from gpd.contracts import (
     PROOF_ACCEPTANCE_TEST_KINDS,
-    THEOREM_CLAIM_KIND_VALUES,
     ComparisonVerdict,
     ContractResults,
     ProjectContractParseResult,
     ResearchContract,
     SuggestedContractCheck,
+    claim_requires_proof_audit,
     collect_plan_contract_integrity_errors,
     collect_proof_audit_alignment_errors,
     contract_has_explicit_context_intake,
     parse_comparison_verdicts_data_strict,
     parse_contract_results_data_artifact,
     parse_project_contract_data_strict,
-    statement_looks_theorem_like,
 )
 from gpd.core.constants import (
     PLAN_SUFFIX,
@@ -362,25 +361,10 @@ _DECISIVE_ACCEPTANCE_TEST_COMPARISON_KINDS: dict[str, frozenset[str]] = {
     "benchmark": frozenset({"benchmark"}),
     "cross_method": frozenset({"cross_method"}),
 }
-_THEOREM_CLAIM_KINDS = frozenset(THEOREM_CLAIM_KIND_VALUES)
 # Plan contracts can omit collection fields that already have safe closed-vocabulary
 # defaults in the schema models; downstream validation should stabilize them rather
 # than reject otherwise valid model output for restating "other".
 _PLAN_CONTRACT_EXPLICIT_COLLECTION_FIELDS: tuple[tuple[str, str], ...] = ()
-
-
-def _claim_requires_proof_audit(claim: object, observable_kind_by_id: dict[str, str]) -> bool:
-    observables = getattr(claim, "observables", [])
-    return (
-        getattr(claim, "claim_kind", "other") in _THEOREM_CLAIM_KINDS
-        or statement_looks_theorem_like(getattr(claim, "statement", None))
-        or bool(getattr(claim, "parameters", []))
-        or bool(getattr(claim, "hypotheses", []))
-        or bool(getattr(claim, "quantifiers", []))
-        or bool(getattr(claim, "conclusion_clauses", []))
-        or bool(getattr(claim, "proof_deliverables", []))
-        or any(observable_kind_by_id.get(observable_id) == "proof_obligation" for observable_id in observables)
-    )
 
 
 def _sha256_text(value: str) -> str:
@@ -392,19 +376,22 @@ def _resolve_contract_artifact_path(
     project_root: Path | None,
     artifact_dir: Path | None,
     path_text: str,
-) -> Path:
+) -> tuple[Path | None, str | None]:
     artifact_path = Path(path_text)
     if artifact_path.is_absolute():
-        return artifact_path
-    if artifact_dir is not None:
-        candidate = artifact_dir / artifact_path
-        if candidate.exists():
-            return candidate
-    if project_root is not None:
-        return project_root / artifact_path
-    if artifact_dir is not None:
-        return artifact_dir / artifact_path
-    return artifact_path
+        return None, "must be a project-relative path"
+
+    anchor_dir = artifact_dir or project_root
+    if anchor_dir is None:
+        return artifact_path, None
+
+    resolved_root = (project_root or anchor_dir).resolve(strict=False)
+    candidate = (anchor_dir / artifact_path).resolve(strict=False)
+    try:
+        candidate.relative_to(resolved_root)
+    except ValueError:
+        return None, "must resolve inside the project root"
+    return candidate, None
 
 
 class FrontmatterValidation(BaseModel):
@@ -643,7 +630,7 @@ def _claim_pass_proof_audit_errors(
     claim_by_id = {claim.id: claim for claim in contract.claims}
     observable_kind_by_id = {observable.id: observable.kind for observable in contract.observables}
     claim = claim_by_id.get(claim_id)
-    if claim is None or not _claim_requires_proof_audit(claim, observable_kind_by_id):
+    if claim is None or not claim_requires_proof_audit(claim, observable_kind_by_id):
         return []
     if claim_result.status != "passed":
         return []
@@ -768,7 +755,7 @@ def _proof_audit_errors(
     }
 
     for claim in contract.claims:
-        if not _claim_requires_proof_audit(claim, observable_kind_by_id):
+        if not claim_requires_proof_audit(claim, observable_kind_by_id):
             continue
 
         result = contract_results.claims.get(claim.id)
@@ -790,13 +777,16 @@ def _proof_audit_errors(
         )
 
         if proof_audit.proof_artifact_path:
-            if proof_audit.proof_artifact_sha256:
-                resolved_artifact = _resolve_contract_artifact_path(
-                    project_root=project_root,
-                    artifact_dir=artifact_dir,
-                    path_text=proof_audit.proof_artifact_path,
-                )
+            resolved_artifact, artifact_error = _resolve_contract_artifact_path(
+                project_root=project_root,
+                artifact_dir=artifact_dir,
+                path_text=proof_audit.proof_artifact_path,
+            )
+            if artifact_error is not None:
+                errors.append(f"claim {claim.id} proof_audit proof_artifact_path {artifact_error}")
+            elif proof_audit.proof_artifact_sha256:
                 try:
+                    assert resolved_artifact is not None
                     actual_sha = hashlib.sha256(resolved_artifact.read_bytes()).hexdigest()
                 except OSError:
                     actual_sha = None
@@ -808,21 +798,25 @@ def _proof_audit_errors(
                     errors.append(f"claim {claim.id} proof_audit proof_artifact_sha256 is stale")
 
         if proof_audit.audit_artifact_path and proof_audit.audit_artifact_sha256:
-            resolved_audit_artifact = _resolve_contract_artifact_path(
+            resolved_audit_artifact, artifact_error = _resolve_contract_artifact_path(
                 project_root=project_root,
                 artifact_dir=artifact_dir,
                 path_text=proof_audit.audit_artifact_path,
             )
-            try:
-                actual_audit_sha = hashlib.sha256(resolved_audit_artifact.read_bytes()).hexdigest()
-            except OSError:
-                actual_audit_sha = None
-            if actual_audit_sha is None:
-                errors.append(
-                    f"claim {claim.id} proof_audit audit_artifact_path does not resolve to a readable file"
-                )
-            elif actual_audit_sha != proof_audit.audit_artifact_sha256:
-                errors.append(f"claim {claim.id} proof_audit audit_artifact_sha256 is stale")
+            if artifact_error is not None:
+                errors.append(f"claim {claim.id} proof_audit audit_artifact_path {artifact_error}")
+            else:
+                try:
+                    assert resolved_audit_artifact is not None
+                    actual_audit_sha = hashlib.sha256(resolved_audit_artifact.read_bytes()).hexdigest()
+                except OSError:
+                    actual_audit_sha = None
+                if actual_audit_sha is None:
+                    errors.append(
+                        f"claim {claim.id} proof_audit audit_artifact_path does not resolve to a readable file"
+                    )
+                elif actual_audit_sha != proof_audit.audit_artifact_sha256:
+                    errors.append(f"claim {claim.id} proof_audit audit_artifact_sha256 is stale")
 
         if result.status != "passed":
             continue
@@ -1262,7 +1256,14 @@ def _find_matching_plan_contract(summary_dir: Path, summary_meta: dict) -> _Plan
         project_root = resolve_project_root(summary_dir)
         if project_root is None:
             return _PlanContractResolution()
-        candidate = (project_root / relative_plan_path).resolve(strict=False)
+        candidate, path_error = _resolve_contract_artifact_path(
+            project_root=project_root,
+            artifact_dir=project_root,
+            path_text=relative_plan_path.as_posix(),
+        )
+        if path_error is not None:
+            return _PlanContractResolution(errors=[f"plan_contract_ref: {path_error}"])
+        assert candidate is not None
         if not candidate.exists():
             return _PlanContractResolution()
         matched, resolution = _resolve_plan_contract_candidate(candidate, summary_meta)
@@ -1502,6 +1503,8 @@ class PlanValidation(BaseModel):
     task_count: int = 0
     tasks: list[TaskInfo] = Field(default_factory=list)
     frontmatter_fields: list[str] = Field(default_factory=list)
+    requires_knowledge: list[str] = Field(default_factory=list)
+    requires_assertion: list[str] = Field(default_factory=list)
 
 
 class PhaseCompleteness(BaseModel):

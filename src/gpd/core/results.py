@@ -27,6 +27,7 @@ __all__ = [
     "ResultSearchResult",
     "ResultUpsertResult",
     "ResultDeps",
+    "ResultDownstream",
     "MissingDep",
     "result_add",
     "result_list",
@@ -34,6 +35,7 @@ __all__ = [
     "result_upsert",
     "result_upsert_derived",
     "result_deps",
+    "result_downstream",
     "result_verify",
     "result_update",
 ]
@@ -55,6 +57,8 @@ class IntermediateResult(BaseModel):
     validity: str | None = None
     phase: str | None = None
     depends_on: list[str] = Field(default_factory=list)
+    knowledge_deps: list[str] = Field(default_factory=list)
+    assertion_deps: list[str] = Field(default_factory=list)
     verified: bool = False
     verification_records: list[VerificationEvidence] = Field(default_factory=list)
 
@@ -68,6 +72,17 @@ class ResultDeps(BaseModel):
     depends_on: list[str]
     direct_deps: list[IntermediateResult | MissingDep]
     transitive_deps: list[IntermediateResult | MissingDep]
+
+
+class ResultDownstream(BaseModel):
+    """Downstream dependents of a result (reverse dependency trace)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    result_id: str
+    direct_dependents: list[str] = Field(default_factory=list)      # result IDs at BFS depth 1
+    transitive_dependents: list[str] = Field(default_factory=list)  # all reachable IDs, BFS order
+    cycle_detected: bool = False                                     # True if a cycle was found
 
 
 class ResultSearchResult(BaseModel):
@@ -718,6 +733,95 @@ def result_deps(state: dict, result_id: str) -> ResultDeps:
         depends_on=list(direct_dep_ids),
         direct_deps=direct_deps,
         transitive_deps=transitive_deps,
+    )
+
+
+def result_downstream(state: dict, result_id: str) -> ResultDownstream:
+    """Return the downstream dependents of *result_id* using reverse-BFS.
+
+    Builds a reverse adjacency map (dep → [results that depend on dep]) in O(N),
+    then performs a BFS from *result_id* through that map.
+
+    Returns:
+        ResultDownstream with:
+        - ``direct_dependents``: result IDs at BFS depth 1.
+        - ``transitive_dependents``: all reachable result IDs in BFS level order,
+          deduplicated (includes direct dependents).
+        - ``cycle_detected``: True if a cycle was encountered during traversal.
+
+    If *result_id* is not present in the state, returns an empty ``ResultDownstream``
+    (no exception).
+    """
+    results = state.get("intermediate_results", [])
+
+    # Build reverse adjacency map: dep_id → list[result_ids that depend on dep_id]
+    reverse: dict[str, list[str]] = {}
+    for r in results:
+        if not isinstance(r, dict):
+            continue
+        rid = r.get("id")
+        if not rid:
+            continue
+        for dep in r.get("depends_on", []):
+            reverse.setdefault(dep, []).append(rid)
+
+    # If the result_id is not in the state at all, return empty result
+    all_ids: set[str] = {r["id"] for r in results if isinstance(r, dict) and r.get("id")}
+    if result_id not in all_ids:
+        return ResultDownstream(result_id=result_id)
+
+    # BFS through reverse edges.
+    # Distinguish true back-edges (cycles) from cross-edges (diamond convergence):
+    # - ``gray``: nodes enqueued but not yet popped (in the BFS frontier)
+    # - ``black``: nodes already popped and fully expanded
+    # A back-edge (cycle) points to a black node; a cross-edge points to a gray node.
+    # The root is treated as black from the start.
+    black: set[str] = {result_id}   # fully expanded; seed treated as pre-expanded
+    gray: set[str] = set()          # enqueued, not yet expanded
+    direct_dependents: list[str] = []
+    transitive_dependents: list[str] = []
+    cycle_detected = False
+
+    # BFS level 1 — direct dependents
+    level: list[str] = reverse.get(result_id, [])
+    queue: deque[str] = deque()
+    for node_id in level:
+        if node_id in black:
+            # Back-edge to an already-expanded node → cycle
+            logger.debug("Cycle detected in result graph at %s", node_id)
+            cycle_detected = True
+            continue
+        if node_id in gray:
+            # Cross-edge to another gray node (diamond convergence) → skip, no cycle
+            continue
+        gray.add(node_id)
+        direct_dependents.append(node_id)
+        transitive_dependents.append(node_id)
+        queue.append(node_id)
+
+    # BFS levels 2+
+    while queue:
+        current = queue.popleft()
+        gray.discard(current)
+        black.add(current)
+        for node_id in reverse.get(current, []):
+            if node_id in black:
+                # Back-edge → cycle
+                logger.debug("Cycle detected in result graph at %s", node_id)
+                cycle_detected = True
+                continue
+            if node_id in gray:
+                # Cross-edge (diamond) → skip
+                continue
+            gray.add(node_id)
+            transitive_dependents.append(node_id)
+            queue.append(node_id)
+
+    return ResultDownstream(
+        result_id=result_id,
+        direct_dependents=direct_dependents,
+        transitive_dependents=transitive_dependents,
+        cycle_detected=cycle_detected,
     )
 
 

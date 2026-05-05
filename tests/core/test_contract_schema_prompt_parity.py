@@ -18,6 +18,10 @@ from gpd.contracts import (
     ContractForbiddenProxyResult,
     ContractLink,
     ContractObservable,
+    ContractProofAudit,
+    ContractProofConclusionClause,
+    ContractProofHypothesis,
+    ContractProofParameter,
     ContractReference,
     ContractReferenceUsage,
     ContractResultEntry,
@@ -46,6 +50,9 @@ PLAN_MODELS = (
     ContractForbiddenProxy,
     ContractLink,
     ContractUncertaintyMarkers,
+    ContractProofParameter,
+    ContractProofHypothesis,
+    ContractProofConclusionClause,
 )
 
 RESULT_MODELS = (
@@ -57,7 +64,13 @@ RESULT_MODELS = (
     ComparisonVerdict,
     SuggestedContractCheck,
     ContractUncertaintyMarkers,
+    ContractProofAudit,
 )
+
+_LITERAL_TOKEN_EXCLUSIONS: dict[type[object], set[str]] = {
+    ContractProofHypothesis: {"category"},
+    ContractProofAudit: {"quantifier_status", "scope_status", "counterexample_status"},
+}
 
 
 def _read(path: Path) -> str:
@@ -97,6 +110,8 @@ def _field_tokens(*models: type[object]) -> set[str]:
             tokens.add(field_name)
             if model is ContractReferenceUsage and field_name in {"completed_actions", "missing_actions"}:
                 continue
+            if field_name in _LITERAL_TOKEN_EXCLUSIONS.get(model, set()):
+                continue
             tokens.update(_literal_tokens(field.annotation))
     return tokens
 
@@ -106,6 +121,10 @@ def _choice_phrases(*models: type[object]) -> set[str]:
     for model in models:
         for field_name, field in model.model_fields.items():
             if model is ContractReferenceUsage and field_name in {"completed_actions", "missing_actions"}:
+                continue
+            if model is ContractProofAudit:
+                continue
+            if field_name in _LITERAL_TOKEN_EXCLUSIONS.get(model, set()):
                 continue
             values = _ordered_literal_tokens(field.annotation)
             if len(values) > 1:
@@ -149,9 +168,11 @@ def test_contract_results_schema_and_verification_template_surface_canonical_res
 
     tokens = _field_tokens(*RESULT_MODELS)
     _assert_tokens_visible(contract_results_schema, tokens, label="contract-results-schema.md")
-    _assert_tokens_visible(verification_report, tokens, label="verification-report.md")
     _assert_phrases_visible(contract_results_schema, _choice_phrases(*RESULT_MODELS), label="contract-results-schema.md")
-    _assert_phrases_visible(verification_report, _choice_phrases(*RESULT_MODELS), label="verification-report.md")
+    assert "contract-results-schema.md" in verification_report
+    for token in ("contract_results", "comparison_verdicts", "suggested_contract_checks", "subject_role"):
+        assert token in verification_report
+    assert "proof-audit rules in the canonical schema" in verification_report
 
 
 def test_expanded_verifier_and_executor_prompts_keep_canonical_result_ledger_fields_visible() -> None:

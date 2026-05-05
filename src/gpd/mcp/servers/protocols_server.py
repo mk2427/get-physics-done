@@ -7,7 +7,6 @@ Entry point: python -m gpd.mcp.servers.protocols_server
 Console script: gpd-mcp-protocols
 """
 
-import copy
 import json
 import re
 import threading
@@ -23,8 +22,9 @@ from gpd.mcp.servers import (
     configure_mcp_logging,
     parse_frontmatter_with_error,
     published_tool_input_schema,
+    refresh_string_enum_property_schema,
     run_mcp_server,
-    set_published_tool_input_schema,
+    set_registered_and_published_tool_input_schema,
     stable_mcp_error,
     stable_mcp_response,
     tighten_registered_tool_contracts,
@@ -152,20 +152,11 @@ ProtocolDomainFilter = str
 def _schema_with_refreshed_protocol_domain_enum(schema: dict[str, object]) -> dict[str, object]:
     """Return one published schema with the live protocol-domain enum refreshed."""
 
-    refreshed = copy.deepcopy(schema)
-    domain_values = list(_protocol_domain_values())
-    properties = refreshed.get("properties") if isinstance(refreshed, dict) else None
-    if not isinstance(properties, dict):
-        return refreshed
-    domain_schema = properties.get("domain")
-    if not isinstance(domain_schema, dict):
-        return refreshed
-    enum_schema = domain_schema
-    any_of = domain_schema.get("anyOf")
-    if isinstance(any_of, list) and any_of and isinstance(any_of[0], dict):
-        enum_schema = any_of[0]
-    enum_schema["enum"] = domain_values
-    return refreshed
+    return refresh_string_enum_property_schema(
+        schema,
+        property_name="domain",
+        enum_values=list(_protocol_domain_values()),
+    )
 
 
 def _normalize_protocol_tier(raw: object, *, protocol_name: str) -> int:
@@ -568,7 +559,11 @@ async def _list_tools_with_fresh_protocol_schema():
         schema = published_tool_input_schema(tool)
         if schema is None:
             continue
-        set_published_tool_input_schema(tool, _schema_with_refreshed_protocol_domain_enum(schema))
+        set_registered_and_published_tool_input_schema(
+            mcp,
+            tool,
+            _schema_with_refreshed_protocol_domain_enum(schema),
+        )
     return tools
 
 

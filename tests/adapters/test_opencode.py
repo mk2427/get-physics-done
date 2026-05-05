@@ -638,16 +638,16 @@ class TestInstall:
         agent = (target / "agents" / "gpd-planner.md").read_text(encoding="utf-8")
 
         assert expected_bridge + " config ensure-section" in command
-        assert f'INIT=$({expected_bridge} init progress --include state,config)' in command
+        assert f'INIT=$({expected_bridge} --raw init progress --include state,config)' in command
         assert expected_bridge + " config ensure-section" in workflow
-        assert f'INIT=$({expected_bridge} init progress --include state,config)' in workflow
+        assert f'INIT=$({expected_bridge} --raw init progress --include state,config)' in workflow
         assert 'echo "ERROR: gpd initialization failed: $INIT"' in workflow
         assert f'if ! {expected_bridge} verify plan "$plan"; then' in execute_phase
-        assert f'INIT=$({expected_bridge} init plan-phase "<PHASE>")' in agent
+        assert f'INIT=$({expected_bridge} --raw init plan-phase "<PHASE>")' in agent
         assert "```bash\ngpd config ensure-section\n" not in workflow
-        assert 'INIT=$(gpd init progress --include state,config)' not in workflow
+        assert 'INIT=$(gpd --raw init progress --include state,config)' not in workflow
         assert 'if ! gpd verify plan "$plan"; then' not in execute_phase
-        assert 'INIT=$(gpd init plan-phase "<PHASE>")' not in agent
+        assert 'INIT=$(gpd --raw init plan-phase "<PHASE>")' not in agent
 
     def test_install_preserves_existing_mcp_overrides(
         self,

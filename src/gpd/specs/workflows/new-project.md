@@ -135,9 +135,8 @@ Build a canonical scoping contract from the extracted input.
 - What result would make the current framing look wrong or incomplete
 - Unresolved questions / context gaps
 
-**Preservation rule:** If the user names a specific observable, figure, dataset, derivation, paper, benchmark, notebook, prior run, or stop condition, keep that wording recognizable in the contract. Do not generalize it away into a vague proxy.
-If the user does not know the anchor yet, preserve that explicitly in `scope.unresolved_questions`, `context_intake.context_gaps`, or `uncertainty_markers.weakest_anchors` rather than inventing a paper, benchmark, or baseline.
-Prefer explicit missing-anchor wording such as `Which reference should serve as the decisive benchmark anchor?`, `Benchmark reference not yet selected`, `need grounding before the decisive anchor is chosen`, `decisive target not yet chosen`, or `baseline comparison is TBD`.
+**Preservation rule:** Keep named observables, figures, datasets, derivations, papers, benchmarks, notebooks, prior runs, and stop conditions recognizable in the contract; if the anchor is unknown, record that explicitly instead of inventing a paper, benchmark, or baseline.
+Prefer explicit missing-anchor wording such as `Which reference should serve as the decisive benchmark anchor?`, `Benchmark reference not yet selected`, or `decisive target not yet chosen`.
 Do not force a phase list just to make the scoping contract look complete. If decomposition is still unclear, record that uncertainty and let `ROADMAP.md` start with a single coarse phase or first grounded investigation chunk.
 If the init JSON already contains `project_contract`, `project_contract_load_info`, or `project_contract_validation`, preserve that state in the approval gate and continuation decision. Do not collapse a visible-but-blocked contract into a blank slate when deciding whether this is a fresh project or a continuation.
 
@@ -168,7 +167,8 @@ Before you show the approval gate, build the raw contract as a literal JSON obje
   - `references[].kind`: `paper | dataset | prior_artifact | spec | user_anchor | other`
   - `references[].role`: `definition | benchmark | method | must_consider | background | other`
   - `links[].relation`: `supports | computes | visualizes | benchmarks | depends_on | evaluated_by | proves | uses_hypothesis | depends_on_lemma | other`
-- proof-bearing claims (theorem-like claim kinds, or claims linked to `proof_obligation` observables) must include non-empty `proof_deliverables[]`, `parameters[]`, `hypotheses[]`, and `conclusion_clauses[]`
+- treat a claim as proof-bearing whenever any of these is true: `claim_kind` is `theorem`, `lemma`, `corollary`, `proposition`, or `claim`; the statement is theorem-like (`prove/show that`, explicit `for all` / `exists`, or uniqueness language); any proof field is already populated (`parameters`, `hypotheses`, `quantifiers`, `conclusion_clauses`, or `proof_deliverables`); or `observables[]` references a `proof_obligation` target
+- proof-bearing claims must include non-empty `proof_deliverables[]`, `parameters[]`, `hypotheses[]`, and `conclusion_clauses[]`
 - proof-bearing claims must include at least one proof-specific acceptance test kind in `claims[].acceptance_tests[]` (`proof_hypothesis_coverage`, `proof_parameter_coverage`, `proof_quantifier_domain`, `claim_to_proof_alignment`, `lemma_dependency_closure`, or `counterexample_search`)
 - if `references[].must_surface` is `true`, both `references[].applies_to[]` and `references[].required_actions[]` must be non-empty; do not leave must-surface anchors implicit
 - `references[].carry_forward_to[]` is free-text workflow scope such as `planning`, `execution`, `verification`, or `writing`; it is not an enum and must not match any declared contract ID from `observables[]`, `claims[]`, `deliverables[]`, `acceptance_tests[]`, `references[]`, `forbidden_proxies[]`, or `links[]`
@@ -586,7 +586,7 @@ Use ask_user:
 **MANDATORY FIRST STEP — Execute these checks before ANY user interaction:**
 
 ```bash
-INIT=$(gpd init new-project)
+INIT=$(gpd --raw init new-project)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
   # STOP — display the error to the user and do not proceed with the workflow.
@@ -603,7 +603,7 @@ Parse JSON for: `researcher_model`, `synthesizer_model`, `roadmapper_model`, `co
 - `research_mode=explore`: Expand literature survey (spawn 5+ researchers), broader questioning, include speculative research directions in roadmap.
 - `research_mode=exploit`: Focused literature survey (2-3 researchers), targeted questioning, lean roadmap with minimal exploratory phases.
 - `research_mode=adaptive`: Start broad enough to compare viable approaches while scoping the project. Narrow the roadmap only after anchors or decisive evidence make one method family clearly preferable.
-- Before `GPD/config.json` exists, the `autonomy` and `research_mode` values from `gpd init new-project` are temporary defaults, not a durable user choice. Let those defaults govern the initial questioning and scoping pass, then run Step 5 immediately after scope approval and before the first project-artifact commit so the durable config takes over before research and roadmap execution.
+- Before `GPD/config.json` exists, the `autonomy` and `research_mode` values from `gpd --raw init new-project` are temporary defaults, not a durable user choice. Let those defaults govern the initial questioning and scoping pass, then run Step 5 immediately after scope approval and before the first project-artifact commit so the durable config takes over before research and roadmap execution.
 - Treat `project_contract` as approved scope only when `project_contract_gate.authoritative` is true. If the gate is false, keep the contract visible for scoping diagnostics and repair, not as authoritative downstream scope.
 
 **If `project_exists` is true:** Error — project already initialized. Use `gpd:progress`.
@@ -814,7 +814,7 @@ Before writing `PROJECT.md`, synthesize a canonical project contract with at lea
 `schema_version` must be the integer `1`, and `references[].must_surface` must be a boolean `true` or `false`, not a quoted synonym.
 
 If no must-read references are confirmed yet, record that explicitly in the contract rather than inventing one.
-If the user does not know the anchor yet, record that explicitly as an unresolved question or context gap rather than fabricating a paper, dataset, benchmark, or baseline.
+If the user does not know the anchor yet, preserve that explicitly in `scope.unresolved_questions`, `context_intake.context_gaps`, or `uncertainty_markers.weakest_anchors` rather than inventing a paper, benchmark, or baseline.
 Accepted shorthand like `need grounding` or `target not yet chosen` is fine when it clearly refers to the missing decisive anchor.
 If the user supplied explicit observables, deliverables, prior outputs, or stop conditions, preserve them in the contract using wording the user would still recognize. Do not paraphrase them into generic "benchmark" or "artifact" language unless the user asked you to broaden them.
 If the user named a prior output or review checkpoint that must ground approval or be carried forward, put it in `context_intake.must_include_prior_outputs`. Use `context_intake.crucial_inputs` for user-stated observables, stop conditions, review requests, or constraints that must stay visible but do not themselves replace approved-mode grounding.
@@ -822,39 +822,7 @@ Do not approve a scoping contract that strips decisive outputs, anchors, prior o
 If the only checks captured so far are limiting cases, sanity checks, or qualitative expectations, treat the contract as still underspecified unless the user explicitly states that these are the decisive standard.
 Missing-anchor notes preserve uncertainty, but they do not satisfy approval on their own. Do not offer approval until at least one concrete anchor, reference, prior-output constraint, or baseline is present.
 
-Before you ask for approval, build the raw contract as a literal JSON object for the `project_contract` subsection of `templates/state-json-schema.md`:
-
-- author only the JSON object that will be stored in `project_contract`, not the surrounding `state.json` envelope
-- follow the `project_contract` object rules in `templates/state-json-schema.md` exactly
-
-- `project_contract` is a JSON object, not prose
-- `observables`, `claims`, `deliverables`, `acceptance_tests`, `references`, `forbidden_proxies`, and `links` are arrays of objects, not strings
-- every object in those arrays must declare a stable `id`
-- same-kind IDs must be unique within each section; do not repeat an `id` inside `observables[]`, `claims[]`, `deliverables[]`, `acceptance_tests[]`, `references[]`, `forbidden_proxies[]`, or `links[]`
-- `context_intake`, `approach_policy`, and `uncertainty_markers` are objects, not strings or lists
-- `schema_version` must be the integer `1`
-- `references[].must_surface` must be a boolean `true` or `false`, not a quoted synonym
-- `context_intake.must_read_refs` must contain only `references[].id` values
-- `claims[].observables`, `claims[].deliverables`, `claims[].acceptance_tests`, and `claims[].references` must point only to declared IDs
-- `claims[].proof_deliverables` must point only to declared `deliverables[].id` values
-- `acceptance_tests[].subject`, `references[].applies_to`, and `forbidden_proxies[].subject` must point to a claim ID or deliverable ID, never an observable label or free text
-- `acceptance_tests[].evidence_required`, `links[].source`, and `links[].target` may only point to declared claim, deliverable, acceptance-test, or reference IDs
-- for enum fields, use only the exact schema vocabulary:
-  - `observables[].kind`: `scalar | curve | map | classification | proof_obligation | other`
-  - `deliverables[].kind`: `figure | table | dataset | data | derivation | code | note | report | other`
-  - `acceptance_tests[].kind`: `existence | schema | benchmark | consistency | cross_method | limiting_case | symmetry | dimensional_analysis | convergence | oracle | proxy | reproducibility | proof_hypothesis_coverage | proof_parameter_coverage | proof_quantifier_domain | claim_to_proof_alignment | lemma_dependency_closure | counterexample_search | human_review | other`
-  - `acceptance_tests[].automation`: `automated | hybrid | human`
-  - `references[].kind`: `paper | dataset | prior_artifact | spec | user_anchor | other`
-  - `references[].role`: `definition | benchmark | method | must_consider | background | other`
-  - `links[].relation`: `supports | computes | visualizes | benchmarks | depends_on | evaluated_by | proves | uses_hypothesis | depends_on_lemma | other`
-- proof-bearing claims (theorem-like claim kinds, or claims linked to `proof_obligation` observables) must include non-empty `proof_deliverables[]`, `parameters[]`, `hypotheses[]`, and `conclusion_clauses[]`
-- proof-bearing claims must include at least one proof-specific acceptance test kind in `claims[].acceptance_tests[]` (`proof_hypothesis_coverage`, `proof_parameter_coverage`, `proof_quantifier_domain`, `claim_to_proof_alignment`, `lemma_dependency_closure`, or `counterexample_search`)
-- if `references[].must_surface` is `true`, both `references[].applies_to[]` and `references[].required_actions[]` must be non-empty; do not leave must-surface anchors implicit
-- `references[].carry_forward_to[]` is free-text workflow scope such as `planning`, `execution`, `verification`, or `writing`; it is not an enum and must not match any declared contract ID from `observables[]`, `claims[]`, `deliverables[]`, `acceptance_tests[]`, `references[]`, `forbidden_proxies[]`, or `links[]`
-- do **not** invent near-miss enum values such as `anchor`, `manual`, `content-check`, `benchmark-record`, or `anchors`; rewrite them to the exact schema term before approval
-- the contract schema is closed: do not add invented top-level or nested keys, and do not use scalar shortcuts for list fields
-- list fields must stay lists even for single-item values, and blank or duplicate list entries are invalid after trimming whitespace
-- if the user chooses "Review raw contract", show the exact JSON object that will be validated and persisted
+Before you ask for approval, keep the contract as a literal JSON object for the `project_contract` subsection of `templates/state-json-schema.md`, and use that schema as the canonical source of truth for the object rules. Do not restate the contract rules here.
 
 Present a concise scoping summary and require explicit approval before downstream artifact generation:
 
@@ -1261,7 +1229,7 @@ Interpret the sync payload before continuing:
 
 - If `message` is present, summarize it in plain language.
 - If `requires_relaunch` is `true`, show `next_step` verbatim before moving on so the user knows whether the runtime must be restarted or relaunched through a generated command or wrapper.
-- If sync fails because no runtime install could be resolved, explain that the project config was still created successfully and the user can run `gpd permissions sync --runtime <name>` later.
+- If sync fails because no runtime install could be resolved, explain that the project config was still created successfully and the user can run `gpd permissions sync --runtime <runtime>` later.
 - This sync only updates runtime-owned permission settings; it does not create or validate the base install or workflow-tool readiness.
 
 **Commit config.json:**
@@ -1997,6 +1965,48 @@ cat > GPD/init-progress.json << CHECKPOINT
 CHECKPOINT
 ```
 
+## 8.6. Knowledge and Assertion Ingest Hooks
+
+#### M1.6. Knowledge Stabilization Hook (optional)
+
+Check if `--no-knowledge-hook` flag is present in $ARGUMENTS. If present, skip this step entirely (no prompt shown).
+
+Otherwise, ask the user: "Would you like to run `/gpd:digest-knowledge --adversarial` on your reference
+papers now to build reviewed knowledge documents? (Y/n)"
+
+- **Y (or Enter)**: Invoke `/gpd:digest-knowledge --adversarial` for each paper in
+  `GPD/references/` (or ask user for paths if references dir is empty). Run per-paper
+  adversarial loops per brief 002 §4.1 steps 1–2. On completion, report count of
+  Stable knowledge docs produced.
+- **n**: Log "Knowledge stabilization deferred — run `/gpd:digest-knowledge --adversarial`
+  manually when ready." Continue to M1.7.
+- `--no-knowledge-hook` flag bypasses this step entirely (no prompt shown).
+
+**Checkpoint M1.6:**
+```json
+{"step": "M1.6", "completed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "description": "Knowledge stabilization hook offered"}
+```
+
+#### M1.7. Assertion Promotion Hook (optional)
+
+Check if `--no-assertion-hook` flag is present in $ARGUMENTS. If present, skip this step entirely (no prompt shown).
+
+Otherwise, ask the user: "Would you like to promote cataloged equations to assertion documents now
+using `/gpd:digest-assertion`? (Y/n)"
+
+- **Y (or Enter)**: Invoke `/gpd:digest-assertion` for each EQN-REF E-entry in
+  `GPD/knowledge/` (or ask user for entry IDs if no EQN-REF exists yet). Run per-assertion
+  adversarial loops per brief 002 §5.2 routing. On completion, report count of Stable
+  assertion docs produced.
+- **n**: Log "Assertion promotion deferred — run `/gpd:digest-assertion` manually when ready."
+  Continue to project completion.
+- `--no-assertion-hook` flag bypasses this step entirely (no prompt shown).
+
+**Checkpoint M1.7:**
+```json
+{"step": "M1.7", "completed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "description": "Assertion promotion hook offered"}
+```
+
 ## 9. Done
 
 **Delete init-progress.json — initialization is complete:**
@@ -2086,6 +2096,8 @@ gpd:discuss-phase 1 — gather context and clarify approach
 - [ ] gpd-notation-coordinator spawned to establish conventions
 - [ ] CONVENTIONS.md created with subfield-appropriate conventions — **committed**
 - [ ] Convention lock populated via `gpd convention set`
+- [ ] Knowledge stabilization hook offered (M1.6) — accepted or declined
+- [ ] Assertion promotion hook offered (M1.7) — accepted or declined
 - [ ] User knows next step is `gpd:discuss-phase 1`
 
 **Atomic commits:** Each phase commits its artifacts immediately. If context is lost, artifacts persist.

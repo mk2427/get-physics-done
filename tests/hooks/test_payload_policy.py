@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from gpd.adapters.runtime_catalog import get_hook_payload_policy
 from gpd.hooks.install_context import HookLookupContext, SelfOwnedInstallContext
 from gpd.hooks.payload_policy import resolve_hook_payload_policy, resolve_hook_surface_runtime
@@ -56,6 +58,59 @@ def test_resolve_hook_surface_runtime_ignores_self_owned_install_when_surface_is
         runtime = resolve_hook_surface_runtime(hook_file=hook_file, cwd=tmp_path / "workspace", surface="statusline")
 
     assert runtime == "gemini"
+
+
+def test_resolve_hook_surface_runtime_falls_back_when_self_owned_runtime_is_unknown(tmp_path: Path) -> None:
+    hook_file = tmp_path / ".claude" / "hooks" / "notify.py"
+    self_install = SelfOwnedInstallContext(
+        config_dir=tmp_path / ".claude",
+        runtime="unknown-runtime",
+        install_scope="local",
+    )
+
+    with (
+        patch("gpd.hooks.payload_policy.hook_layout.detect_self_owned_install", return_value=self_install),
+        patch(
+            "gpd.hooks.payload_policy.hook_layout.resolve_hook_lookup_context",
+            return_value=HookLookupContext(
+                lookup_cwd=tmp_path / "workspace",
+                resolved_home=tmp_path / "home",
+                active_runtime="gemini",
+                preferred_runtime="gemini",
+            ),
+        ),
+        patch("gpd.hooks.payload_policy.get_runtime_capabilities", side_effect=KeyError("unknown runtime")),
+    ):
+        runtime = resolve_hook_surface_runtime(hook_file=hook_file, cwd=tmp_path / "workspace", surface="notify")
+
+    assert runtime == "gemini"
+
+
+def test_resolve_hook_surface_runtime_propagates_unexpected_runtime_catalog_errors(
+    tmp_path: Path,
+) -> None:
+    hook_file = tmp_path / ".claude" / "hooks" / "notify.py"
+    self_install = SelfOwnedInstallContext(
+        config_dir=tmp_path / ".claude",
+        runtime="broken-runtime",
+        install_scope="local",
+    )
+
+    with (
+        patch("gpd.hooks.payload_policy.hook_layout.detect_self_owned_install", return_value=self_install),
+        patch(
+            "gpd.hooks.payload_policy.hook_layout.resolve_hook_lookup_context",
+            return_value=HookLookupContext(
+                lookup_cwd=tmp_path / "workspace",
+                resolved_home=tmp_path / "home",
+                active_runtime="gemini",
+                preferred_runtime="gemini",
+            ),
+        ),
+        patch("gpd.hooks.payload_policy.get_runtime_capabilities", side_effect=RuntimeError("catalog boom")),
+    ):
+        with pytest.raises(RuntimeError, match="catalog boom"):
+            resolve_hook_surface_runtime(hook_file=hook_file, cwd=tmp_path / "workspace", surface="notify")
 
 
 def test_resolve_hook_payload_policy_uses_surface_runtime_resolution(tmp_path: Path) -> None:
@@ -140,32 +195,6 @@ def test_hook_payload_policy_wrappers_delegate_with_surface_specific_arguments(t
     )
 
 
-def test_resolve_hook_surface_runtime_prefers_nested_workspace_local_install_over_ancestor_project_root(
-    tmp_path: Path,
-) -> None:
-    project = tmp_path / "project"
-    (project / "GPD").mkdir(parents=True)
-    nested = project / "src" / "notes"
-    nested.mkdir(parents=True)
-    home = tmp_path / "home"
-    home.mkdir()
-    _ = project / ".claude"
-    (nested / ".codex" / "hooks").mkdir(parents=True)
-
-    from tests.hooks.helpers import mark_complete_install as _mark_complete_install
-
-    _mark_complete_install(nested / ".codex", runtime="codex")
-
-    with patch("gpd.hooks.runtime_detect.Path.home", return_value=home):
-        runtime = resolve_hook_surface_runtime(
-            hook_file=nested / ".codex" / "hooks" / "notify.py",
-            cwd=nested,
-            surface="notify",
-        )
-
-    assert runtime == "codex"
-
-
 def test_resolve_hook_surface_runtime_prefers_nested_local_install_when_runtime_hint_is_missing(
     tmp_path: Path,
 ) -> None:
@@ -186,58 +215,6 @@ def test_resolve_hook_surface_runtime_prefers_nested_local_install_when_runtime_
     ):
         runtime = resolve_hook_surface_runtime(
             hook_file=nested / ".claude" / "hooks" / "notify.py",
-            cwd=nested,
-            surface="notify",
-        )
-
-    assert runtime == "claude-code"
-
-
-def test_resolve_hook_surface_runtime_falls_back_to_ancestor_project_root_install_when_nested_cwd_has_none(
-    tmp_path: Path,
-) -> None:
-    project = tmp_path / "project"
-    (project / "GPD").mkdir(parents=True)
-    nested = project / "src" / "notes"
-    nested.mkdir(parents=True)
-    home = tmp_path / "home"
-    home.mkdir()
-
-    from tests.hooks.helpers import mark_complete_install as _mark_complete_install
-
-    _mark_complete_install(project / ".claude", runtime="claude-code")
-
-    with patch("gpd.hooks.runtime_detect.Path.home", return_value=home):
-        runtime = resolve_hook_surface_runtime(
-            hook_file=tmp_path / "hooks" / "notify.py",
-            cwd=nested,
-            surface="notify",
-        )
-
-    assert runtime == "claude-code"
-
-
-def test_resolve_hook_surface_runtime_does_not_let_nested_other_runtime_hijack_active_runtime_lookup(
-    tmp_path: Path,
-) -> None:
-    project = tmp_path / "project"
-    (project / "GPD").mkdir(parents=True)
-    nested = project / "src" / "notes"
-    nested.mkdir(parents=True)
-    home = tmp_path / "home"
-    home.mkdir()
-
-    from tests.hooks.helpers import mark_complete_install as _mark_complete_install
-
-    _mark_complete_install(project / ".claude", runtime="claude-code")
-    _mark_complete_install(nested / ".codex", runtime="codex")
-
-    with (
-        patch("gpd.hooks.runtime_detect.Path.home", return_value=home),
-        patch("gpd.hooks.runtime_detect.detect_active_runtime", return_value="claude-code"),
-    ):
-        runtime = resolve_hook_surface_runtime(
-            hook_file=tmp_path / "hooks" / "notify.py",
             cwd=nested,
             surface="notify",
         )

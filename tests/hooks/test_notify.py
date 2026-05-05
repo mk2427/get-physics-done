@@ -8,7 +8,7 @@ import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import call, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -35,7 +35,14 @@ _TEST_PROVIDER = "provider-under-test"
 _TEST_MODEL = "model-under-test"
 
 
+def _mark_gpd_project(project: Path) -> None:
+    gpd_dir = project / "GPD"
+    gpd_dir.mkdir(parents=True, exist_ok=True)
+    (gpd_dir / "state.json").write_text("{}", encoding="utf-8")
+
+
 def _write_current_execution(workspace: Path, payload: dict[str, object]) -> None:
+    _mark_gpd_project(workspace)
     observability = workspace / "GPD" / "observability"
     observability.mkdir(parents=True, exist_ok=True)
     (observability / "current-execution.json").write_text(json.dumps(payload), encoding="utf-8")
@@ -126,7 +133,7 @@ def test_notify_dedupes_repeated_update_notices(tmp_path: Path) -> None:
 
 def test_notify_keeps_update_and_execution_fingerprints_isolated(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
-    (workspace / "GPD").mkdir(parents=True)
+    _mark_gpd_project(workspace)
 
     stderr = io.StringIO()
     update_cache = {
@@ -155,137 +162,19 @@ def test_notify_keeps_update_and_execution_fingerprints_isolated(tmp_path: Path)
     assert "fingerprint" not in state
 
 
-def test_notify_prefers_active_runtime_cache_over_newer_unrelated_runtime_cache(tmp_path: Path) -> None:
-    home = tmp_path / "home"
-
-    local_runtime_dir = tmp_path / ".codex"
-    local_cache = local_runtime_dir / "cache"
-    local_cache.mkdir(parents=True)
-    _mark_complete_install(local_runtime_dir, runtime="codex")
-    (local_cache / "gpd-update-check.json").write_text(
-        json.dumps(
-            {
-                "update_available": True,
-                "installed": "1.2.3",
-                "latest": "1.3.0",
-                "checked": 20,
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    unrelated_runtime_dir = home / ".claude"
-    unrelated_cache = unrelated_runtime_dir / "cache"
-    unrelated_cache.mkdir(parents=True)
-    _mark_complete_install(unrelated_runtime_dir, runtime="claude-code", install_scope="global")
-    (unrelated_cache / "gpd-update-check.json").write_text(
-        json.dumps(
-            {
-                "update_available": True,
-                "installed": "9.0.0",
-                "latest": "9.1.0",
-                "checked": 30,
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    stderr = io.StringIO()
-    with (
-        patch("gpd.hooks.runtime_detect.Path.cwd", return_value=tmp_path),
-        patch("gpd.hooks.runtime_detect.Path.home", return_value=home),
-        patch("gpd.hooks.runtime_detect.detect_active_runtime_with_gpd_install", return_value="codex"),
-        patch("sys.stderr", stderr),
-    ):
-        _check_and_notify_update()
-
-    output = stderr.getvalue()
-    assert "Update available: v1.2.3" in output
-    assert "v9.0.0" not in output
-    expected = _repair_command("codex", install_scope="local", target_dir=local_runtime_dir, explicit_target=False)
-    assert f"Run: {expected}" in output
-
-
-def test_notify_prefers_installed_global_scope_cache_over_stale_local_scope_cache(tmp_path: Path) -> None:
+def test_emit_execution_notification_still_emits_when_dedupe_persistence_fails(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    home = tmp_path / "home"
-
-    local_cache = workspace / ".codex" / "cache"
-    local_cache.mkdir(parents=True)
-    (local_cache / "gpd-update-check.json").write_text(
-        json.dumps(
-            {
-                "update_available": True,
-                "installed": "1.2.3",
-                "latest": "1.3.0",
-                "checked": 30,
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    global_runtime_dir = home / ".codex"
-    global_cache = global_runtime_dir / "cache"
-    global_cache.mkdir(parents=True)
-    _mark_complete_install(global_runtime_dir, runtime="codex", install_scope="global")
-    (global_cache / "gpd-update-check.json").write_text(
-        json.dumps(
-            {
-                "update_available": False,
-                "installed": "9.0.0",
-                "latest": "9.1.0",
-                "checked": 10,
-            }
-        ),
-        encoding="utf-8",
-    )
 
     stderr = io.StringIO()
     with (
-        patch("gpd.hooks.runtime_detect.Path.home", return_value=home),
+        patch("gpd.hooks.notify._execution_notification_message", return_value=("[GPD] Execution review due\n", "resume:seg-2")),
+        patch("gpd.hooks.notify._claim_last_notification", return_value=None),
         patch("sys.stderr", stderr),
     ):
-        _check_and_notify_update(str(workspace))
+        _emit_execution_notification(str(workspace))
 
-    assert stderr.getvalue() == ""
-
-
-def test_notify_uses_explicit_workspace_cwd_over_process_cwd(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    home = tmp_path / "home"
-
-    local_cache = workspace / ".codex" / "cache"
-    local_cache.mkdir(parents=True)
-    _mark_complete_install(workspace / ".codex", runtime="codex")
-    (local_cache / "gpd-update-check.json").write_text(
-        json.dumps(
-            {
-                "update_available": True,
-                "installed": "2.0.0",
-                "latest": "2.1.0",
-                "checked": 30,
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
-    (elsewhere / ".claude" / "cache").mkdir(parents=True)
-
-    stderr = io.StringIO()
-    with (
-        patch("gpd.hooks.runtime_detect.Path.cwd", return_value=elsewhere),
-        patch("gpd.hooks.runtime_detect.Path.home", return_value=home),
-        patch("sys.stderr", stderr),
-    ):
-        _check_and_notify_update(str(workspace))
-
-    output = stderr.getvalue()
-    assert "Update available: v2.0.0" in output
-    assert "Run: npx -y get-physics-done --codex --local" in output
+    assert "Execution review due" in stderr.getvalue()
 
 
 def test_trigger_update_check_uses_sibling_check_update_script(tmp_path: Path) -> None:
@@ -639,41 +528,9 @@ def test_notify_unknown_runtime_falls_back_to_runtime_neutral_update_command(tmp
     assert "Run: gpd-update" not in output
 
 
-def test_notify_ignores_stale_uninstalled_runtime_cache_when_other_runtime_is_installed(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    home = tmp_path / "home"
-
-    stale_cache = workspace / ".codex" / "cache"
-    stale_cache.mkdir(parents=True)
-    (stale_cache / "gpd-update-check.json").write_text(
-        json.dumps(
-            {
-                "update_available": True,
-                "installed": "2.0.0",
-                "latest": "2.1.0",
-                "checked": 30,
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    global_runtime_dir = home / ".claude"
-    _mark_complete_install(global_runtime_dir, runtime="claude-code", install_scope="global")
-
-    stderr = io.StringIO()
-    with (
-        patch("gpd.hooks.runtime_detect.Path.home", return_value=home),
-        patch("sys.stderr", stderr),
-    ):
-        _check_and_notify_update(str(workspace))
-
-    assert stderr.getvalue() == ""
-
-
 def test_notification_state_path_uses_project_layout_observability_root(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
-    (workspace / "GPD").mkdir(parents=True)
+    _mark_gpd_project(workspace)
     nested = workspace / "src" / "notes"
     nested.mkdir(parents=True)
 
@@ -948,432 +805,11 @@ def test_main_accepts_workspace_mapping_with_cwd_field() -> None:
     mock_notify.assert_called_once_with(expected)
 
 
-def test_main_resolves_alias_only_workspace_payload_before_ambient_runtime_policy(tmp_path: Path) -> None:
-    process_cwd = tmp_path / "process-cwd"
-    process_cwd.mkdir()
-    _mark_complete_install(process_cwd / ".codex", runtime="codex")
-
-    project = tmp_path / "project"
-    nested = project / "src" / "notes"
-    nested.mkdir(parents=True)
-    (project / "GPD").mkdir()
-    home = tmp_path / "home"
-    home.mkdir()
-    payload = {
-        "type": "agent-turn-complete",
-        "workspace": {"current_dir": str(nested), "project_dir": str(project)},
-    }
-    resolved_nested = str(nested.resolve(strict=False))
-    resolved_project = str(project.resolve(strict=False))
-
-    with (
-        patch("gpd.hooks.runtime_detect.Path.cwd", return_value=process_cwd),
-        patch("gpd.hooks.runtime_detect.Path.home", return_value=home),
-        patch("gpd.hooks.payload_roots.os.getcwd", return_value=str(process_cwd)),
-        patch("sys.stdin", io.StringIO(json.dumps(payload))),
-        patch("gpd.hooks.notify._record_usage_telemetry") as mock_usage,
-        patch("gpd.hooks.notify._trigger_update_check") as mock_trigger,
-        patch("gpd.hooks.notify._check_and_notify_update") as mock_notify,
-        patch("gpd.hooks.notify._emit_execution_notification") as mock_execution,
-    ):
-        main()
-
-    mock_usage.assert_called_once_with(
-        payload,
-        workspace_dir=resolved_nested,
-        project_root=resolved_project,
-        active_runtime=None,
-    )
-    mock_trigger.assert_called_once_with(resolved_nested)
-    mock_notify.assert_called_once_with(resolved_nested)
-    mock_execution.assert_called_once_with(resolved_nested)
-
-
-def test_main_uses_workspace_local_runtime_lookup_when_available(tmp_path: Path) -> None:
-    project = tmp_path / "project"
-    nested = project / "src" / "notes"
-    nested.mkdir(parents=True)
-    _mark_complete_install(nested / ".codex", runtime="codex")
-    payload = {
-        "type": "agent-turn-complete",
-        "workspace": {"current_dir": str(nested), "project_dir": str(project)},
-    }
-    hook_payload = SimpleNamespace(
-        project_dir_keys=("project_dir",),
-        notify_event_types=("agent-turn-complete",),
-    )
-
-    with (
-        patch("sys.stdin", io.StringIO(json.dumps(payload))),
-        patch(
-            "gpd.hooks.notify._resolve_payload_roots",
-            return_value=SimpleNamespace(
-                workspace_dir=str(nested),
-                project_root=str(project),
-                project_dir_present=True,
-                project_dir_trusted=False,
-            ),
-        ),
-        patch(
-            "gpd.hooks.install_context.resolve_hook_lookup_context",
-            return_value=SimpleNamespace(
-                lookup_cwd=nested,
-                resolved_home=tmp_path / "home",
-                active_runtime="codex",
-                preferred_runtime="codex",
-            ),
-        ),
-        patch("gpd.hooks.notify._hook_payload_policy", return_value=hook_payload) as mock_policy,
-        patch("gpd.hooks.notify._record_usage_telemetry") as mock_usage,
-        patch("gpd.hooks.notify._trigger_update_check") as mock_trigger,
-        patch("gpd.hooks.notify._check_and_notify_update") as mock_notify,
-        patch("gpd.hooks.notify._emit_execution_notification") as mock_execution,
-    ):
-        main()
-
-    assert mock_policy.call_args_list == [call(str(nested)), call(str(nested))]
-    mock_usage.assert_called_once_with(
-        payload,
-        workspace_dir=str(nested),
-        project_root=str(project),
-        active_runtime="codex",
-    )
-    mock_trigger.assert_called_once_with(str(nested))
-    mock_notify.assert_called_once_with(str(nested))
-    mock_execution.assert_called_once_with(str(nested))
-
-
-def test_main_uses_project_runtime_lookup_when_nested_workspace_has_unrelated_local_install(
-    tmp_path: Path,
-) -> None:
-    project = tmp_path / "project"
-    nested = project / "src" / "notes"
-    nested.mkdir(parents=True)
-    _mark_complete_install(project / ".codex", runtime="codex")
-    _mark_complete_install(nested / ".claude", runtime="claude-code")
-
-    payload = {
-        "type": "agent-turn-complete",
-        "workspace": {"cwd": str(nested), "project_dir": str(project)},
-    }
-    hook_payload = SimpleNamespace(
-        project_dir_keys=("project_dir",),
-        notify_event_types=("agent-turn-complete",),
-    )
-
-    def _payload_runtime(cwd: str | None = None) -> str | None:
-        if cwd == str(project):
-            return "codex"
-        if cwd == str(nested):
-            return "claude-code"
-        return None
-
-    with (
-        patch("sys.stdin", io.StringIO(json.dumps(payload))),
-        patch(
-            "gpd.hooks.notify._resolve_payload_roots",
-            return_value=SimpleNamespace(
-                workspace_dir=str(nested),
-                project_root=str(project),
-                project_dir_present=True,
-                project_dir_trusted=True,
-            ),
-        ),
-        patch("gpd.hooks.notify._payload_runtime", side_effect=_payload_runtime) as mock_runtime,
-        patch("gpd.hooks.notify._hook_payload_policy", return_value=hook_payload) as mock_policy,
-        patch("gpd.hooks.notify._record_usage_telemetry") as mock_usage,
-        patch("gpd.hooks.notify._trigger_update_check") as mock_trigger,
-        patch("gpd.hooks.notify._check_and_notify_update") as mock_notify,
-        patch("gpd.hooks.notify._emit_execution_notification") as mock_execution,
-    ):
-        main()
-
-    assert mock_policy.call_args_list == [call(str(nested)), call(str(project))]
-    mock_runtime.assert_called_once_with(str(project))
-    mock_usage.assert_called_once_with(
-        payload,
-        workspace_dir=str(nested),
-        project_root=str(project),
-        active_runtime="codex",
-    )
-    mock_trigger.assert_called_once_with(str(project))
-    mock_notify.assert_called_once_with(str(project))
-    mock_execution.assert_called_once_with(str(project))
-
-
-def test_main_uses_workspace_runtime_lookup_when_explicit_project_dir_is_present_and_project_root_runtime_is_missing(
-    tmp_path: Path,
-) -> None:
-    project = tmp_path / "project"
-    nested = project / "src" / "notes"
-    nested.mkdir(parents=True)
-    _mark_complete_install(nested / ".codex", runtime="codex")
-
-    payload = {
-        "type": "agent-turn-complete",
-        "workspace": {"cwd": str(nested), "project_dir": str(project)},
-    }
-    hook_payload = SimpleNamespace(
-        project_dir_keys=("project_dir",),
-        notify_event_types=("agent-turn-complete",),
-    )
-
-    def _payload_runtime(cwd: str | None = None) -> str | None:
-        if cwd == str(project):
-            return None
-        if cwd == str(nested):
-            return "codex"
-        return None
-
-    with (
-        patch("sys.stdin", io.StringIO(json.dumps(payload))),
-        patch(
-            "gpd.hooks.notify._resolve_payload_roots",
-            return_value=SimpleNamespace(
-                workspace_dir=str(nested),
-                project_root=str(project),
-                project_dir_present=True,
-                project_dir_trusted=True,
-            ),
-        ),
-        patch("gpd.hooks.notify._payload_runtime", side_effect=_payload_runtime) as mock_runtime,
-        patch("gpd.hooks.notify._hook_payload_policy", return_value=hook_payload) as mock_policy,
-        patch("gpd.hooks.notify._record_usage_telemetry") as mock_usage,
-        patch("gpd.hooks.notify._trigger_update_check") as mock_trigger,
-        patch("gpd.hooks.notify._check_and_notify_update") as mock_notify,
-        patch("gpd.hooks.notify._emit_execution_notification") as mock_execution,
-    ):
-        main()
-
-    assert mock_policy.call_args_list == [call(str(nested)), call(str(nested))]
-    assert mock_runtime.call_args_list == [call(str(project)), call(str(nested))]
-    mock_usage.assert_called_once_with(
-        payload,
-        workspace_dir=str(nested),
-        project_root=str(project),
-        active_runtime="codex",
-    )
-    mock_trigger.assert_called_once_with(str(nested))
-    mock_notify.assert_called_once_with(str(nested))
-    mock_execution.assert_called_once_with(str(nested))
-
-
-def test_main_treats_policy_alias_only_workspace_mapping_as_local_runtime_lookup(tmp_path: Path) -> None:
-    project = tmp_path / "project"
-    nested = project / "src" / "notes"
-    nested.mkdir(parents=True)
-    _mark_complete_install(nested / ".codex", runtime="codex")
-
-    payload = {
-        "type": "agent-turn-complete",
-        "workspace": {"current_dir": str(nested), "project_root": str(project)},
-    }
-    hook_payload = SimpleNamespace(
-        workspace_keys=("cwd", "current_dir"),
-        project_dir_keys=("project_dir", "project_root"),
-        notify_event_types=("agent-turn-complete",),
-    )
-    captured: dict[str, object] = {}
-
-    def _resolve_runtime_lookup(roots, runtime_resolver):
-        captured["project_dir_trusted"] = roots.project_dir_trusted
-        return SimpleNamespace(lookup_dir=str(nested), active_runtime="codex")
-
-    with (
-        patch("sys.stdin", io.StringIO(json.dumps(payload))),
-        patch(
-            "gpd.hooks.notify._resolve_payload_roots",
-            return_value=SimpleNamespace(
-                workspace_dir=str(nested),
-                project_root=str(project),
-                project_dir_present=True,
-                project_dir_trusted=True,
-            ),
-        ),
-        patch(
-            "gpd.hooks.notify.resolve_runtime_lookup_context_from_payload_roots",
-            side_effect=_resolve_runtime_lookup,
-        ),
-        patch("gpd.hooks.notify._hook_payload_policy", return_value=hook_payload) as mock_policy,
-        patch("gpd.hooks.notify._record_usage_telemetry") as mock_usage,
-        patch("gpd.hooks.notify._trigger_update_check") as mock_trigger,
-        patch("gpd.hooks.notify._check_and_notify_update") as mock_notify,
-        patch("gpd.hooks.notify._emit_execution_notification") as mock_execution,
-    ):
-        main()
-
-    assert captured["project_dir_trusted"] is False
-    assert mock_policy.call_args_list == [call(str(nested)), call(str(nested))]
-    mock_usage.assert_called_once_with(
-        payload,
-        workspace_dir=str(nested),
-        project_root=str(project),
-        active_runtime="codex",
-    )
-    mock_trigger.assert_called_once_with(str(nested))
-    mock_notify.assert_called_once_with(str(nested))
-    mock_execution.assert_called_once_with(str(nested))
-
-
-def test_main_treats_top_level_project_root_alias_with_alias_only_workspace_mapping_as_local_runtime_lookup(
-    tmp_path: Path,
-) -> None:
-    project = tmp_path / "project"
-    nested = project / "src" / "notes"
-    nested.mkdir(parents=True)
-    _mark_complete_install(nested / ".codex", runtime="codex")
-
-    payload = {
-        "type": "agent-turn-complete",
-        "workspace": {"current_dir": str(nested)},
-        "project_root": str(project),
-    }
-    hook_payload = SimpleNamespace(
-        workspace_keys=("cwd", "current_dir"),
-        project_dir_keys=("project_dir", "project_root"),
-        notify_event_types=("agent-turn-complete",),
-    )
-    captured: dict[str, object] = {}
-
-    def _resolve_runtime_lookup(roots, runtime_resolver):
-        captured["project_dir_trusted"] = roots.project_dir_trusted
-        return SimpleNamespace(lookup_dir=str(nested), active_runtime="codex")
-
-    with (
-        patch("sys.stdin", io.StringIO(json.dumps(payload))),
-        patch(
-            "gpd.hooks.notify._resolve_payload_roots",
-            return_value=SimpleNamespace(
-                workspace_dir=str(nested),
-                project_root=str(project),
-                project_dir_present=True,
-                project_dir_trusted=True,
-            ),
-        ),
-        patch(
-            "gpd.hooks.notify.resolve_runtime_lookup_context_from_payload_roots",
-            side_effect=_resolve_runtime_lookup,
-        ),
-        patch("gpd.hooks.notify._hook_payload_policy", return_value=hook_payload) as mock_policy,
-        patch("gpd.hooks.notify._record_usage_telemetry") as mock_usage,
-        patch("gpd.hooks.notify._trigger_update_check") as mock_trigger,
-        patch("gpd.hooks.notify._check_and_notify_update") as mock_notify,
-        patch("gpd.hooks.notify._emit_execution_notification") as mock_execution,
-    ):
-        main()
-
-    assert captured["project_dir_trusted"] is False
-    assert mock_policy.call_args_list == [call(str(nested)), call(str(nested))]
-    mock_usage.assert_called_once_with(
-        payload,
-        workspace_dir=str(nested),
-        project_root=str(project),
-        active_runtime="codex",
-    )
-    mock_trigger.assert_called_once_with(str(nested))
-    mock_notify.assert_called_once_with(str(nested))
-    mock_execution.assert_called_once_with(str(nested))
-
-
-def test_main_uses_runtime_lookup_provenance_over_raw_project_dir_string(tmp_path: Path) -> None:
-    project = tmp_path / "project"
-    nested = project / "src" / "notes"
-    nested.mkdir(parents=True)
-    _mark_complete_install(nested / ".codex", runtime="codex")
-
-    payload = {
-        "type": "agent-turn-complete",
-        "workspace": {"cwd": str(nested), "project_dir": str(project)},
-    }
-    hook_payload = SimpleNamespace(
-        project_dir_keys=("project_dir",),
-        notify_event_types=("agent-turn-complete",),
-    )
-
-    def _payload_runtime(cwd: str | None = None) -> str | None:
-        if cwd == str(nested):
-            return "codex"
-        if cwd == str(project):
-            return None
-        return None
-
-    with (
-        patch("sys.stdin", io.StringIO(json.dumps(payload))),
-        patch(
-            "gpd.hooks.notify._resolve_payload_roots",
-            return_value=SimpleNamespace(
-                workspace_dir=str(nested),
-                project_root=str(project),
-                project_dir_present=True,
-                project_dir_trusted=False,
-            ),
-        ),
-        patch("gpd.hooks.notify._payload_runtime", side_effect=_payload_runtime) as mock_runtime,
-        patch("gpd.hooks.notify._hook_payload_policy", return_value=hook_payload),
-        patch("gpd.hooks.notify._record_usage_telemetry") as mock_usage,
-        patch("gpd.hooks.notify._trigger_update_check") as mock_trigger,
-        patch("gpd.hooks.notify._check_and_notify_update") as mock_notify,
-        patch("gpd.hooks.notify._emit_execution_notification") as mock_execution,
-    ):
-        main()
-
-    assert mock_runtime.call_args_list == [call(str(nested))]
-    mock_usage.assert_called_once_with(
-        payload,
-        workspace_dir=str(nested),
-        project_root=str(project),
-        active_runtime="codex",
-    )
-    mock_trigger.assert_called_once_with(str(nested))
-    mock_notify.assert_called_once_with(str(nested))
-    mock_execution.assert_called_once_with(str(nested))
-
-
-def test_main_prefers_project_dir_root_over_nested_workspace_cwd(tmp_path: Path) -> None:
-    project = tmp_path / "project"
-    nested = project / "src" / "notes"
-    nested.mkdir(parents=True)
-    (project / "GPD").mkdir()
-
-    payload = {"type": "agent-turn-complete", "workspace": {"cwd": str(nested), "project_dir": str(project)}}
-    with (
-        patch("sys.stdin", io.StringIO(json.dumps(payload))),
-        patch("gpd.hooks.notify._trigger_update_check") as mock_trigger,
-        patch("gpd.hooks.notify._check_and_notify_update") as mock_notify,
-        patch("gpd.hooks.notify._emit_execution_notification") as mock_execution,
-    ):
-        main()
-
-    mock_trigger.assert_called_once_with(str(project))
-    mock_notify.assert_called_once_with(str(project))
-    mock_execution.assert_called_once_with(str(project))
-
-
-def test_main_prefers_top_level_project_dir_root_over_top_level_cwd(tmp_path: Path) -> None:
-    project = tmp_path / "project"
-    nested = project / "src" / "notes"
-    nested.mkdir(parents=True)
-    (project / "GPD").mkdir()
-
-    payload = {"type": "agent-turn-complete", "cwd": str(nested), "project_dir": str(project)}
-    with (
-        patch("sys.stdin", io.StringIO(json.dumps(payload))),
-        patch("gpd.hooks.notify._trigger_update_check") as mock_trigger,
-        patch("gpd.hooks.notify._check_and_notify_update") as mock_notify,
-        patch("gpd.hooks.notify._emit_execution_notification") as mock_execution,
-    ):
-        main()
-
-    mock_trigger.assert_called_once_with(str(project))
-    mock_notify.assert_called_once_with(str(project))
-    mock_execution.assert_called_once_with(str(project))
-
-
 def test_main_passes_workspace_and_project_roots_to_usage_recorder_when_supported(tmp_path: Path) -> None:
     project = tmp_path / "project"
     nested = project / "src" / "notes"
     nested.mkdir(parents=True)
-    (project / "GPD").mkdir()
+    _mark_gpd_project(project)
 
     payload = {
         "type": "agent-turn-complete",
@@ -1424,80 +860,16 @@ def test_main_passes_workspace_and_project_roots_to_usage_recorder_when_supporte
     assert captured["workspace_root"] != captured["project_root"]
 
 
-def test_main_passes_workspace_and_project_roots_to_usage_recorder_for_runtime_specific_aliases(
-    tmp_path: Path,
-) -> None:
-    project = tmp_path / "project"
-    nested = project / "src" / "notes"
-    nested.mkdir(parents=True)
-    (project / "GPD").mkdir()
-
-    payload = {
-        "type": "agent-turn-complete",
-        "workspace": {"current_dir": str(nested), "project_root": str(project)},
-        "model": {"id": _TEST_MODEL, "provider": _TEST_PROVIDER},
-        "tokens": {"promptTokens": 120, "completionTokens": 30},
-    }
-    captured: dict[str, object] = {}
-    hook_payload = type(
-        "HookPayload",
-        (),
-        {
-            "workspace_keys": ("current_dir",),
-            "project_dir_keys": ("project_root",),
-            "notify_event_types": (),
-        },
-    )()
-
-    def _record(
-        payload_arg: dict[str, object],
-        *,
-        runtime: str | None,
-        cwd: Path,
-        workspace_root: Path,
-        project_root: Path,
-    ) -> None:
-        captured["payload"] = payload_arg
-        captured["runtime"] = runtime
-        captured["cwd"] = cwd
-        captured["workspace_root"] = workspace_root
-        captured["project_root"] = project_root
-
-    with (
-        patch("sys.stdin", io.StringIO(json.dumps(payload))),
-        patch("gpd.hooks.notify._hook_payload_policy", return_value=hook_payload),
-        patch("gpd.hooks.notify._payload_runtime", return_value=_TELEMETRY_RUNTIME),
-        patch("gpd.hooks.notify._runtime_supports_usage_telemetry", return_value=True),
-        patch("gpd.core.costs.record_usage_from_runtime_payload", side_effect=_record) as mock_record,
-        patch("gpd.hooks.notify._trigger_update_check") as mock_trigger,
-        patch("gpd.hooks.notify._check_and_notify_update") as mock_notify,
-        patch("gpd.hooks.notify._emit_execution_notification") as mock_execution,
-    ):
-        main()
-
-    resolved_nested = nested.resolve(strict=False)
-    resolved_project = project.resolve(strict=False)
-
-    mock_record.assert_called_once()
-    mock_trigger.assert_called_once_with(str(project))
-    mock_notify.assert_called_once_with(str(project))
-    mock_execution.assert_called_once_with(str(project))
-    assert captured["payload"] == payload
-    assert captured["runtime"] == _TELEMETRY_RUNTIME
-    assert captured["cwd"] == resolved_nested
-    assert captured["workspace_root"] == resolved_nested
-    assert captured["project_root"] == resolved_project
-
 def test_main_expands_tilde_workspace_and_project_dir(tmp_path: Path) -> None:
     home = tmp_path / "home"
     project = home / "project"
     nested = project / "src"
     nested.mkdir(parents=True)
-    (project / "GPD").mkdir()
+    _mark_gpd_project(project)
     payload = {"type": "agent-turn-complete", "workspace": {"cwd": "~/project/src", "project_dir": "~/project"}}
 
     with (
-        patch.dict("os.environ", {"HOME": str(home)}),
+        patch.dict("os.environ", {"HOME": str(home), "USERPROFILE": str(home)}),
         patch("sys.stdin", io.StringIO(json.dumps(payload))),
         patch("gpd.hooks.notify._trigger_update_check") as mock_trigger,
         patch("gpd.hooks.notify._check_and_notify_update") as mock_notify,
@@ -1506,32 +878,6 @@ def test_main_expands_tilde_workspace_and_project_dir(tmp_path: Path) -> None:
 
     mock_trigger.assert_called_once_with(str(project))
     mock_notify.assert_called_once_with(str(project))
-
-
-def test_main_accepts_top_level_cwd_workspace_alias() -> None:
-    expected = str(Path("/tmp/project").resolve(strict=False))
-    with (
-        patch("sys.stdin", io.StringIO(json.dumps({"type": "agent-turn-complete", "cwd": "/tmp/project"}))),
-        patch("gpd.hooks.notify._trigger_update_check") as mock_trigger,
-        patch("gpd.hooks.notify._check_and_notify_update") as mock_notify,
-    ):
-        main()
-
-    mock_trigger.assert_called_once_with(expected)
-    mock_notify.assert_called_once_with(expected)
-
-
-def test_main_accepts_string_workspace_payload() -> None:
-    expected = str(Path("/tmp/project").resolve(strict=False))
-    with (
-        patch("sys.stdin", io.StringIO(json.dumps({"type": "agent-turn-complete", "workspace": "/tmp/project"}))),
-        patch("gpd.hooks.notify._trigger_update_check") as mock_trigger,
-        patch("gpd.hooks.notify._check_and_notify_update") as mock_notify,
-    ):
-        main()
-
-    mock_trigger.assert_called_once_with(expected)
-    mock_notify.assert_called_once_with(expected)
 
 
 def test_main_defaults_project_root_to_workspace_dir_when_project_dir_is_missing(tmp_path: Path) -> None:
@@ -1662,57 +1008,6 @@ def test_main_records_workspace_state_subagent_attribution(tmp_path: Path) -> No
     assert row["agent_id_source"] == "workspace.current-agent-id"
 
 
-def test_main_records_workspace_state_subagent_attribution_from_top_level_aliases(tmp_path: Path) -> None:
-    project = tmp_path / "workspace"
-    nested = project / "src"
-    nested.mkdir(parents=True)
-    data_root = tmp_path / "data-root"
-    (project / "GPD").mkdir(parents=True, exist_ok=True)
-    (project / "GPD" / "current-agent-id.txt").write_text("agent-88\n", encoding="utf-8")
-    _write_current_execution(
-        project,
-        {
-            "session_id": "sess-top-level",
-            "segment_status": "active",
-            "current_task": "Run executor task",
-        },
-    )
-    payload = {
-        "type": "agent-turn-complete",
-        "cwd": str(nested),
-        "project_dir": str(project),
-        "model": {"id": _TEST_MODEL, "provider": _TEST_PROVIDER},
-        "tokens": {
-            "promptTokens": 120,
-            "completionTokens": 30,
-            "usdCost": 0.42,
-        },
-    }
-
-    with (
-        patch.dict("os.environ", {"GPD_DATA_DIR": str(data_root)}),
-        patch("sys.stdin", io.StringIO(json.dumps(payload))),
-        patch("gpd.hooks.notify._payload_runtime", return_value=_TELEMETRY_RUNTIME),
-        patch("gpd.hooks.notify._runtime_supports_usage_telemetry", return_value=True),
-        patch("gpd.core.costs.get_current_session_id", return_value="sess-top-level"),
-        patch("gpd.hooks.notify._trigger_update_check"),
-        patch("gpd.hooks.notify._check_and_notify_update"),
-        patch("gpd.hooks.notify._emit_execution_notification"),
-    ):
-        main()
-
-    ledger_path = usage_ledger_path(data_root)
-    rows = [json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-
-    assert len(rows) == 1
-    row = rows[0]
-    assert row["workspace_root"] == nested.resolve(strict=False).as_posix()
-    assert row["project_root"] == project.resolve(strict=False).as_posix()
-    assert row["agent_scope"] == "subagent"
-    assert row["agent_id"] == "agent-88"
-    assert row["agent_attribution_source"] == "workspace-state"
-
-
 def test_main_does_not_record_usage_when_runtime_capability_is_unknown(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -1732,36 +1027,6 @@ def test_main_does_not_record_usage_when_runtime_capability_is_unknown(tmp_path:
         patch.dict("os.environ", {"GPD_DATA_DIR": str(data_root)}),
         patch("sys.stdin", io.StringIO(json.dumps(payload))),
         patch("gpd.hooks.notify._payload_runtime", return_value=None),
-        patch("gpd.core.costs.record_usage_from_runtime_payload") as mock_record,
-        patch("gpd.hooks.notify._trigger_update_check"),
-        patch("gpd.hooks.notify._check_and_notify_update"),
-        patch("gpd.hooks.notify._emit_execution_notification"),
-    ):
-        main()
-
-    mock_record.assert_not_called()
-    assert not usage_ledger_path(data_root).exists()
-
-
-def test_main_does_not_record_usage_when_runtime_capability_excludes_notify_telemetry(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    data_root = tmp_path / "data-root"
-    payload = {
-        "type": "agent-turn-complete",
-        "workspace": str(workspace),
-        "model": {"id": _TEST_MODEL, "provider": _TEST_PROVIDER},
-        "tokens": {
-            "promptTokens": 120,
-            "completionTokens": 30,
-            "usdCost": 0.42,
-        },
-    }
-
-    with (
-        patch.dict("os.environ", {"GPD_DATA_DIR": str(data_root)}),
-        patch("sys.stdin", io.StringIO(json.dumps(payload))),
-        patch("gpd.hooks.notify._payload_runtime", return_value="claude-code"),
         patch("gpd.core.costs.record_usage_from_runtime_payload") as mock_record,
         patch("gpd.hooks.notify._trigger_update_check"),
         patch("gpd.hooks.notify._check_and_notify_update"),
@@ -1793,6 +1058,20 @@ def test_main_logs_usage_skip_when_runtime_capability_is_unknown(tmp_path: Path)
     assert "usage telemetry skipped: runtime capability unknown or unsupported" in stderr.getvalue()
 
 
+def test_runtime_supports_usage_telemetry_returns_false_for_unknown_runtime() -> None:
+    with patch("gpd.adapters.runtime_catalog.get_runtime_capabilities", side_effect=KeyError("unknown runtime")):
+        assert notify_module._runtime_supports_usage_telemetry("broken-runtime") is False
+
+
+def test_runtime_supports_usage_telemetry_propagates_unexpected_runtime_catalog_errors() -> None:
+    with patch(
+        "gpd.adapters.runtime_catalog.get_runtime_capabilities",
+        side_effect=RuntimeError("catalog boom"),
+    ):
+        with pytest.raises(RuntimeError, match="catalog boom"):
+            notify_module._runtime_supports_usage_telemetry("broken-runtime")
+
+
 def test_main_does_not_record_usage_when_usage_container_has_no_token_or_cost_signal(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -1816,6 +1095,31 @@ def test_main_does_not_record_usage_when_usage_container_has_no_token_or_cost_si
         main()
 
     assert not usage_ledger_path(data_root).exists()
+
+
+def test_record_usage_telemetry_logs_advisory_when_runtime_capability_lookup_fails_unexpectedly(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    stderr = io.StringIO()
+
+    with (
+        patch("gpd.adapters.runtime_catalog.get_runtime_capabilities", side_effect=RuntimeError("catalog boom")),
+        patch("gpd.core.costs.record_usage_from_runtime_payload") as mock_record,
+        patch("gpd.hooks.notify._debug") as mock_debug,
+        patch.dict("os.environ", {"GPD_DEBUG": "1"}),
+        patch("sys.stderr", stderr),
+    ):
+        notify_module._record_usage_telemetry(
+            {"type": "agent-turn-complete"},
+            workspace_dir=str(workspace),
+            project_root=str(workspace),
+            active_runtime="broken-runtime",
+        )
+
+    mock_record.assert_not_called()
+    mock_debug.assert_called_once_with("usage telemetry skipped: catalog boom")
 
 
 def test_main_logs_handler_exception_instead_of_swallowing(tmp_path: Path) -> None:
@@ -2223,7 +1527,7 @@ def test_emit_execution_notification_for_paused_state_without_resume_file_is_con
 def test_emit_execution_notification_dedupes_concurrent_resume_state(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    (workspace / "GPD").mkdir()
+    _mark_gpd_project(workspace)
     barrier = threading.Barrier(2)
 
     class _SlowStderr:

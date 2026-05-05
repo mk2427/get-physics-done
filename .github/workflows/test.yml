@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -46,12 +46,17 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
@@ -59,5 +64,10 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Run test suite
-        run: uv run pytest tests/ -q -n auto
+      - name: Run fast test suite
+        run: uv run pytest tests/ -q --dist=loadscope
+
+      - name: Run complementary heavy suite
+        run: |
+          HEAVY_SUITE_IGNORE_ARGS="$(uv run python -c "from tests.conftest import complementary_heavy_suite_ignore_args; print(' '.join(complementary_heavy_suite_ignore_args()))")"
+          uv run pytest tests/ -q --full-suite --dist=loadscope $HEAVY_SUITE_IGNORE_ARGS

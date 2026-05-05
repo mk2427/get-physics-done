@@ -851,7 +851,7 @@ def _execution_visibility_next_commands(
                 reason="inspect recent local observability sessions",
             ),
             ExecutionVisibilitySuggestion(
-                command="gpd progress --brief",
+                command="gpd progress bar",
                 reason="inspect the workspace state separately from live execution telemetry",
             ),
         ]
@@ -916,7 +916,7 @@ def _execution_visibility_next_commands(
             )
             suggestions.append(
                 ExecutionVisibilitySuggestion(
-                    command="gpd progress --brief",
+                    command="gpd progress bar",
                     reason="cross-check broader workspace progress separately from the live execution state",
                 )
             )
@@ -929,7 +929,7 @@ def _execution_visibility_next_commands(
             )
             suggestions.append(
                 ExecutionVisibilitySuggestion(
-                    command="gpd progress --brief",
+                    command="gpd progress bar",
                     reason="check a compact workspace-level summary separately from the live execution state",
                 )
             )
@@ -942,7 +942,7 @@ def _execution_visibility_next_commands(
         )
         suggestions.append(
             ExecutionVisibilitySuggestion(
-                command="gpd progress --brief",
+                command="gpd progress bar",
                 reason="inspect the current workspace state",
             )
         )

@@ -73,7 +73,17 @@ from gpd.core.proof_review import (
     resolve_manuscript_proof_review_status,
     resolve_phase_proof_review_status,
 )
-from gpd.core.public_surface_contract import local_cli_bridge_commands, local_cli_help_command
+from gpd.core.public_surface_contract import (
+    local_cli_bridge_commands,
+    local_cli_doctor_local_command,
+    local_cli_help_command,
+    local_cli_install_local_example_command,
+    local_cli_permissions_sync_command,
+    local_cli_plan_preflight_command,
+    local_cli_resume_command,
+    local_cli_resume_recent_command,
+    local_cli_validate_command_context_command,
+)
 from gpd.core.publication_review_paths import (
     manuscript_matches_review_artifact_path,
     review_artifact_round,
@@ -319,7 +329,7 @@ def _format_display_path_from_cwd(target: str | Path | None, *, cwd: Path) -> st
         relative = resolved_target.relative_to(resolved_cwd)
     except ValueError:
         if resolved_target.anchor and resolved_target.anchor == resolved_cwd.anchor:
-            relative_text = os.path.relpath(resolved_target, resolved_cwd)
+            relative_text = Path(os.path.relpath(resolved_target, resolved_cwd)).as_posix()
             return "." if relative_text in ("", ".") else relative_text
         return _format_display_path(resolved_target)
 
@@ -735,20 +745,25 @@ class _GPDTyper(typer.Typer):
             raise
 
 
+def _cli_epilog() -> str:
+    return (
+        "Primary research workflow commands run inside an installed runtime surface, not the local `gpd` CLI.\n"
+        f"Use `{local_cli_install_local_example_command()}` to install GPD, then open that runtime and run its GPD help command there.\n\n"
+        "Use the local CLI for install, readiness checks, permissions, observability, validation, and diagnostics.\n"
+        "Examples:\n"
+        f"  {local_cli_install_local_example_command()}\n"
+        f"  {local_cli_doctor_local_command()}\n"
+        + "".join(f"  {command}\n" for command in local_cli_bridge_commands())
+        + f"  {local_cli_validate_command_context_command()}"
+    )
+
+
 app = _GPDTyper(
     name="gpd",
     help="GPD — Get Physics Done: local install, readiness, validation, permissions, observability, and diagnostics CLI",
     no_args_is_help=True,
     add_completion=True,
-    epilog=(
-        "Primary research workflow commands run inside an installed runtime surface, not the local `gpd` CLI.\n"
-        "Use `gpd install <runtime>` to install GPD, then open that runtime and run its GPD help command there.\n\n"
-        "Use the local CLI for install, readiness checks, permissions, observability, validation, and diagnostics.\n"
-        "Examples:\n"
-        "  gpd install <runtime> --local\n"
-        + "".join(f"  {command}\n" for command in local_cli_bridge_commands())
-        + "  gpd validate command-context gpd:new-project"
-    ),
+    epilog=_cli_epilog(),
 )
 
 
@@ -1228,7 +1243,7 @@ def _resume_recent_hint(payload: dict[str, object]) -> str | None:
         _payload_flag(payload, key) for key in ("state_exists", "roadmap_exists", "project_exists")
     ):
         return None
-    return "If this is the wrong workspace, run `gpd resume --recent` to search other recent projects on this machine."
+    return f"If this is the wrong workspace, run `{local_cli_resume_recent_command()}` to search other recent projects on this machine."
 
 
 def _resume_runtime_commands(*, cwd: Path | None = None) -> tuple[str | None, str | None]:
@@ -1837,13 +1852,12 @@ def _normalize_recent_project_row(row: object) -> dict[str, object] | None:
 
     from gpd.core.recent_projects import RecentProjectEntry
 
-    unexpected_fields = sorted(key for key in row if key not in RecentProjectEntry.model_fields)
-    if unexpected_fields:
-        formatted = ", ".join(unexpected_fields)
-        raise ValueError(f"recent-project row contains unexpected field(s): {formatted}")
-
     project_root = _recent_project_text(row, "project_root")
     if project_root is None:
+        unexpected_fields = sorted(key for key in row if key not in RecentProjectEntry.model_fields)
+        if unexpected_fields:
+            formatted = ", ".join(unexpected_fields)
+            raise ValueError(f"recent-project row contains unexpected field(s): {formatted}")
         return None
 
     project_path = Path(project_root).expanduser()
@@ -1858,7 +1872,9 @@ def _normalize_recent_project_row(row: object) -> dict[str, object] | None:
         "available": available,
         "missing": not available,
     }
-    if project_path.is_absolute():
+    if not available:
+        normalized["command"] = "unavailable"
+    elif project_path.is_absolute():
         normalized["command"] = f"gpd --cwd {shlex.quote(str(project_path.resolve(strict=False)))} resume"
     else:
         normalized["command"] = None
@@ -1956,6 +1972,8 @@ def _resume_recent_project_command(row: dict[str, object]) -> str:
     """Return the exact command to reopen one recent project."""
     project_root = row.get("project_root")
     if not isinstance(project_root, str) or not project_root.strip():
+        return "unavailable"
+    if row.get("available") is not True:
         return "unavailable"
     project_path = Path(project_root).expanduser().resolve(strict=False)
     return f"gpd --cwd {shlex.quote(str(project_path))} resume"
@@ -2129,19 +2147,15 @@ def _resume_augmented_payload(payload: dict[str, object], *, cwd: Path | None = 
 
 def _render_recent_resume_summary(rows: list[dict[str, object]]) -> None:
     """Render the recent-project picker for cross-project recovery."""
-    recovery_advice = _resume_recovery_advice(recent_rows=rows, force_recent=True)
-
     console.print("[bold]Recent Projects[/]")
     console.print("[dim]Machine-local recovery index. Recent projects are ordered by recovery strength, then recency. A single recoverable match can auto-select; otherwise choose explicitly with the command shown for each row.[/]")
-    if isinstance(recovery_advice.continue_command, str) and recovery_advice.continue_command.strip() and not recovery_advice.continue_command.startswith("runtime `"):
-        console.print(f"[dim]In the selected workspace, continue with `{recovery_advice.continue_command}`.[/]")
-    if isinstance(recovery_advice.fast_next_command, str) and recovery_advice.fast_next_command.strip() and not recovery_advice.fast_next_command.startswith("runtime `"):
-        console.print(f"[dim]After resuming, `{recovery_advice.fast_next_command}` is the fastest next runtime action.[/]")
     console.print()
 
     if not rows:
         console.print("[dim]No recent projects are recorded on this machine yet.[/]")
-        console.print("[dim]Run `gpd resume` inside a project first, or wait for session continuity to be recorded.[/]")
+        console.print(
+            f"[dim]Run `{local_cli_resume_command()}` inside a project first, or wait for session continuity to be recorded.[/]"
+        )
         return
 
     for idx, row in enumerate(rows, start=1):
@@ -2170,9 +2184,8 @@ def _render_recent_resume_summary(rows: list[dict[str, object]]) -> None:
         console.print()
     console.print()
     console.print("[bold]Next here[/]")
-    console.print("- Run the exact `gpd --cwd ... resume` command from the table to continue in the selected workspace.")
-    for line in _resume_follow_up_actions(recovery_advice):
-        console.print(f"- {line}")
+    console.print("- Select a workspace above, then continue there with `resume-work`.")
+    console.print("- After resuming, `suggest-next` is the fastest next action.")
 
 
 def _render_resume_summary(payload: dict[str, object]) -> None:
@@ -2306,7 +2319,7 @@ def _render_resume_summary(payload: dict[str, object]) -> None:
     console.print("[bold]Recovery ladder[/]")
     console.print(f"- {recovery_resume_action()}")
     console.print(f"- {recovery_recent_action()}")
-    console.print("- `gpd init resume` remains the machine-readable backend used by runtime resume workflows.")
+    console.print("- `gpd --raw resume` is the machine-readable local recovery surface.")
     hint = _resume_recent_hint(public_payload)
     if hint is not None:
         console.print(f"- {hint}")
@@ -3509,9 +3522,9 @@ def _observe_execution_status_note(result: ObserveExecutionResult) -> str | None
     if result.status_classification == "waiting":
         return "[cyan]This execution is waiting on review or another gate.[/] It is not currently treated as stalled."
     if result.status_classification == "paused-or-resumable":
-        return "[cyan]This execution is paused or resumable.[/] Use `gpd resume` to inspect the best recovery target."
+        return f"[cyan]This execution is paused or resumable.[/] Use `{local_cli_resume_command()}` to inspect the best recovery target."
     if result.status_classification == "blocked":
-        return "[yellow]This execution is blocked.[/] Use `gpd resume` and the recent event trail to inspect the blocker context."
+        return f"[yellow]This execution is blocked.[/] Use `{local_cli_resume_command()}` and the recent event trail to inspect the blocker context."
     return None
 
 
@@ -4544,20 +4557,33 @@ app.add_typer(config_app, name="config")
 _WOLFRAM_INTEGRATION_NAME = WOLFRAM_MANAGED_INTEGRATION.integration_id
 
 
+def _require_project_root_for_integrations(cwd: Path) -> Path:
+    """Require a verified GPD project root for project-scoped integrations."""
+    workspace_cwd = cwd.expanduser().resolve(strict=False)
+    project_root = resolve_project_root(workspace_cwd, require_layout=True)
+    if project_root is None:
+        _error(
+            "gpd integrations require a real GPD project root. Run the command from inside a project with a GPD/ layout."
+        )
+    return project_root
+
+
 def _integrations_config_path(cwd: Path) -> Path:
     """Return the per-project shared-integration config path."""
-    return WOLFRAM_MANAGED_INTEGRATION.project_config_path(cwd)
+    project_root = _require_project_root_for_integrations(cwd)
+    return WOLFRAM_MANAGED_INTEGRATION.project_config_path(project_root)
 
 
 def _update_wolfram_integration_state(cwd: Path, *, enabled: bool) -> dict[str, object]:
     """Persist the Wolfram integration override in the project-local config file."""
     from gpd.core.utils import atomic_write, file_lock
 
-    config_path = _integrations_config_path(cwd)
+    project_root = _require_project_root_for_integrations(cwd)
+    config_path = _integrations_config_path(project_root)
     with file_lock(config_path):
         try:
-            payload = WOLFRAM_MANAGED_INTEGRATION.project_payload(cwd, strict=True)
-            current = WOLFRAM_MANAGED_INTEGRATION.project_record(cwd, strict=True) or {}
+            payload = WOLFRAM_MANAGED_INTEGRATION.project_payload(project_root)
+            current = WOLFRAM_MANAGED_INTEGRATION.project_record(project_root) or {}
         except RuntimeError as exc:
             _error(str(exc))
         updated: dict[str, object] = {"enabled": enabled}
@@ -4569,8 +4595,8 @@ def _update_wolfram_integration_state(cwd: Path, *, enabled: bool) -> dict[str, 
         atomic_write(config_path, json.dumps(payload, indent=2) + "\n")
 
     try:
-        ready = WOLFRAM_MANAGED_INTEGRATION.is_configured(cwd=cwd, strict=True)
-        endpoint = WOLFRAM_MANAGED_INTEGRATION.resolved_endpoint(cwd=cwd, strict=True)
+        ready = WOLFRAM_MANAGED_INTEGRATION.is_configured(cwd=project_root)
+        endpoint = WOLFRAM_MANAGED_INTEGRATION.resolved_endpoint(cwd=project_root)
     except RuntimeError as exc:
         _error(str(exc))
 
@@ -4583,18 +4609,19 @@ def _update_wolfram_integration_state(cwd: Path, *, enabled: bool) -> dict[str, 
         "endpoint": endpoint,
         "api_key_env": WOLFRAM_MANAGED_INTEGRATION.api_key_env_var,
         "scope": "project-local",
-        "plan_readiness_command": "gpd validate plan-preflight <PLAN.md>",
+        "plan_readiness_command": local_cli_plan_preflight_command(),
     }
 
 
 def _wolfram_integration_status_payload(cwd: Path) -> dict[str, object]:
     """Return the effective project-local status payload for the Wolfram integration."""
-    config_path = _integrations_config_path(cwd)
+    project_root = _require_project_root_for_integrations(cwd)
+    config_path = _integrations_config_path(project_root)
     try:
-        record = WOLFRAM_MANAGED_INTEGRATION.project_record(cwd, strict=True)
-        enabled = WOLFRAM_MANAGED_INTEGRATION.project_enabled(cwd, strict=True)
-        ready = WOLFRAM_MANAGED_INTEGRATION.is_configured(cwd=cwd, strict=True)
-        endpoint = WOLFRAM_MANAGED_INTEGRATION.resolved_endpoint(cwd=cwd, strict=True)
+        record = WOLFRAM_MANAGED_INTEGRATION.project_record(project_root)
+        enabled = WOLFRAM_MANAGED_INTEGRATION.project_enabled(project_root)
+        ready = WOLFRAM_MANAGED_INTEGRATION.is_configured(cwd=project_root)
+        endpoint = WOLFRAM_MANAGED_INTEGRATION.resolved_endpoint(cwd=project_root)
     except RuntimeError as exc:
         _error(str(exc))
 
@@ -4604,7 +4631,7 @@ def _wolfram_integration_status_payload(cwd: Path) -> dict[str, object]:
     if not enabled:
         next_step = "Run `gpd integrations enable wolfram` to re-enable the shared Wolfram bridge for this project."
     elif ready:
-        next_step = "Use `gpd validate plan-preflight <PLAN.md>` to verify whether a specific plan can run."
+        next_step = f"Use `{local_cli_plan_preflight_command()}` to verify whether a specific plan can run."
     else:
         next_step = (
             f"Set `{WOLFRAM_MANAGED_INTEGRATION.api_key_env_var}` to make the shared Wolfram bridge available, "
@@ -4622,7 +4649,7 @@ def _wolfram_integration_status_payload(cwd: Path) -> dict[str, object]:
         "endpoint": endpoint,
         "api_key_env": WOLFRAM_MANAGED_INTEGRATION.api_key_env_var,
         "api_key_present": api_key_present,
-        "plan_readiness_command": "gpd validate plan-preflight <PLAN.md>",
+        "plan_readiness_command": local_cli_plan_preflight_command(),
         "next_step": next_step,
         "local_mathematica_note": (
             "Local Mathematica / Wolfram Language installs are separate from this shared optional integration."
@@ -4891,7 +4918,10 @@ def _runtime_permissions_payload(
             "target": None,
             "sync_applied": False,
             "changed": False,
-            "message": "No active runtime was detected. Run `gpd permissions sync --runtime <name>` after installing GPD into a runtime.",
+            "message": (
+                "No active runtime was detected. "
+                f"Run `{local_cli_permissions_sync_command()}` after installing GPD into a runtime."
+            ),
             }
         )
 
@@ -4951,7 +4981,6 @@ def _permissions_status_payload(
     return normalize_permissions_readiness_payload(
         payload,
         requested_runtime=runtime,
-        requested_autonomy=autonomy,
     )
 
 
@@ -5622,26 +5651,22 @@ def _enclosing_project_root_for_json_input(input_path: str) -> Path | None:
     target = Path(input_path)
     if not target.is_absolute():
         resolved = (cwd / target).resolve(strict=False)
-        for base in (resolved.parent, *resolved.parent.parents):
-            if (base / "GPD").is_dir():
-                return base
-        return None
+        return resolve_project_root(resolved.parent, require_layout=True)
 
     resolved = target.expanduser().resolve(strict=False)
     immediate_parent = resolved.parent
-    if (immediate_parent / "GPD").is_dir():
-        return immediate_parent
+    immediate_project_root = resolve_project_root(immediate_parent, require_layout=True)
+    if immediate_project_root == immediate_parent:
+        return immediate_project_root
 
-    for base in immediate_parent.parents:
-        gpd_dir = (base / "GPD").resolve(strict=False)
-        if not gpd_dir.is_dir():
-            continue
-        try:
-            resolved.relative_to(gpd_dir)
-        except ValueError:
-            continue
-        return base
-    return None
+    resolved_project_root = resolve_project_root(immediate_parent, require_layout=True)
+    if resolved_project_root is None:
+        return None
+    try:
+        resolved.relative_to(resolved_project_root / "GPD")
+    except ValueError:
+        return None
+    return resolved_project_root
 
 
 def _resolve_existing_input_path(input_path: str | None, *, candidates: tuple[str, ...], label: str) -> Path:
@@ -5944,7 +5969,7 @@ def _build_recoverable_workspace_guidance(*, init_command: str) -> str:
     """Render the standardized recovery guidance string for project-required commands."""
     return (
         "This command requires a recoverable GPD workspace. "
-        "Open the right project, use `gpd resume --recent` to rediscover it, or "
+        f"Open the right project, use `{local_cli_resume_recent_command()}` to rediscover it, or "
         f"initialize a new project with `{init_command}` in the runtime surface or `gpd init new-project` in the local CLI."
     )
 
@@ -6404,7 +6429,7 @@ def _build_command_context_preflight(
                 if recoverable
                 else (
                     "This command found multiple recoverable recent GPD projects and will not switch silently. "
-                    "Use `gpd resume --recent` to pick the right project explicitly, then reopen it in the runtime."
+                    f"Use `{local_cli_resume_recent_command()}` to pick the right project explicitly, then reopen it in the runtime."
                     if reentry.requires_user_selection
                     else (
                         _build_recoverable_workspace_guidance(init_command=init_command)
@@ -8480,7 +8505,11 @@ def _resolve_detected_runtime_target(runtime_name: str) -> tuple[Path | None, st
 
 
 def _install_summary_local_cli_bridge_line() -> str:
-    """Return the concise local-CLI bridge follow-up for install summaries."""
+    """Return the concise local-CLI bridge follow-up for install summaries.
+
+    The richer settings guidance stays in bootstrap/help surfaces that render
+    post_start_settings_note() and post_start_settings_recommendation().
+    """
     return f"Use [bold]{local_cli_help_command()}[/] for local diagnostics and later setup."
 
 
@@ -8659,7 +8688,19 @@ def _run_install_readiness_preflight(
     return failures, advisories
 
 
-@app.command("install")
+def _install_command_doc() -> str:
+    return (
+        "Install GPD skills, agents, and hooks into runtime config directories.\n\n"
+        "Run without arguments for interactive mode. Specify runtime name(s) or --all for batch mode.\n\n"
+        "Examples::\n\n"
+        "    gpd install                        # interactive\n"
+        f"    {local_cli_install_local_example_command()}              # single runtime, local\n"
+        "    gpd install <runtime-a> <runtime-b>\n"
+        "    gpd install --all --global         # all runtimes, global\n"
+    )
+
+
+@app.command("install", help=_install_command_doc())
 def install(
     runtimes: list[str] | None = typer.Argument(
         None,
@@ -8671,17 +8712,7 @@ def install(
     target_dir: str | None = typer.Option(None, "--target-dir", help="Override target config directory"),
     force_statusline: bool = typer.Option(False, "--force-statusline", help="Overwrite existing statusline config"),
 ) -> None:
-    """Install GPD skills, agents, and hooks into runtime config directories.
-
-    Run without arguments for interactive mode. Specify runtime name(s) or --all for batch mode.
-
-    Examples::
-
-        gpd install                        # interactive
-        gpd install <runtime>              # single runtime, local
-        gpd install <runtime-a> <runtime-b>
-        gpd install --all --global         # all runtimes, global
-    """
+    """Install GPD skills, agents, and hooks into runtime config directories."""
     from rich.progress import Progress, SpinnerColumn, TextColumn
 
     from gpd.core.health import runtime_doctor_hint
@@ -8820,6 +8851,9 @@ def install(
 
     if failures:
         raise typer.Exit(code=1)
+
+
+install.__doc__ = _install_command_doc()
 
 
 # ═══════════════════════════════════════════════════════════════════════════

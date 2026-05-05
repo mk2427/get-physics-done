@@ -181,6 +181,15 @@ def _write_proof_contract_phase(tmp_path: Path) -> tuple[Path, Path]:
                   subject: claim-proof
                   proxy: Prove only the r_0 = 0 subcase
                   reason: Would silently drop a named theorem parameter
+              references:
+                - id: ref-proof-anchor
+                  kind: paper
+                  locator: Author et al., Journal, 2024
+                  role: background
+                  why_it_matters: Concrete grounding for the theorem statement and proof audit.
+                  applies_to: [claim-proof]
+                  must_surface: true
+                  required_actions: [read]
               uncertainty_markers:
                 weakest_anchors: [Counterexample search scope remains finite]
                 disconfirming_observations: [A valid counterexample at r_0 > 0 invalidates the theorem]
@@ -298,7 +307,12 @@ def _proof_verification_content(
               status: {acceptance_test_status}
               summary: Proof-to-claim alignment review completed.
               linked_ids: [claim-proof, deliv-proof]
-          references: {{}}
+          references:
+            ref-proof-anchor:
+              status: completed
+              completed_actions: [read]
+              missing_actions: []
+              summary: Concrete grounding anchor reviewed.
           forbidden_proxies:
             fp-proof:
               status: rejected
@@ -1029,6 +1043,7 @@ def test_validate_frontmatter_summary_with_source_path_reports_unresolved_plan_c
 def test_validate_frontmatter_summary_does_not_resolve_plan_contract_ref_above_project_root(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     (project_root / "GPD").mkdir(parents=True)
+    (project_root / "GPD" / "state.json").write_text("{}", encoding="utf-8")
     summary_dir = project_root / "artifacts" / "nested"
     summary_dir.mkdir(parents=True)
     summary_path = summary_dir / "01-SUMMARY.md"

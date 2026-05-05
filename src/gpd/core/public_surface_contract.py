@@ -26,16 +26,22 @@ __all__ = [
     "local_cli_bridge_contract",
     "local_cli_cost_command",
     "local_cli_doctor_command",
+    "local_cli_doctor_global_command",
+    "local_cli_doctor_local_command",
     "local_cli_help_command",
+    "local_cli_install_local_example_command",
     "local_cli_integrations_status_wolfram_command",
     "local_cli_observe_execution_command",
     "local_cli_permissions_status_command",
     "local_cli_bridge_note",
     "local_cli_presets_list_command",
+    "local_cli_plan_preflight_command",
     "local_cli_resume_command",
     "local_cli_resume_recent_command",
     "local_cli_permissions_sync_command",
     "local_cli_unattended_readiness_command",
+    "local_cli_validate_command_context_command",
+    "local_cli_bridge_purpose_phrase",
     "post_start_settings_contract",
     "post_start_settings_note",
     "post_start_settings_recommendation",
@@ -71,6 +77,7 @@ class LocalCliNamedCommandsContract:
     observe_execution: str
     cost: str
     presets_list: str
+    plan_preflight: str
     integrations_status_wolfram: str
 
     def ordered(self) -> tuple[str, ...]:
@@ -85,6 +92,7 @@ class LocalCliNamedCommandsContract:
             self.observe_execution,
             self.cost,
             self.presets_list,
+            self.plan_preflight,
             self.integrations_status_wolfram,
         )
 
@@ -95,6 +103,10 @@ class LocalCliBridgeContract:
     named_commands: LocalCliNamedCommandsContract
     terminal_phrase: str
     purpose_phrase: str
+    install_local_example: str
+    doctor_local_command: str
+    doctor_global_command: str
+    validate_command_context_command: str
 
     def render_note(self) -> str:
         return (
@@ -159,61 +171,6 @@ class PublicSurfaceContract:
     recovery_ladder: RecoveryLadderContract
 
 
-_PUBLIC_SURFACE_CONTRACT_KEYS = (
-    "schema_version",
-    "beginner_onboarding",
-    "local_cli_bridge",
-    "post_start_settings",
-    "resume_authority",
-    "recovery_ladder",
-)
-_PUBLIC_SURFACE_SECTION_KEYS = {
-    "beginner_onboarding": ("hub_url", "preflight_requirements", "caveats", "startup_ladder"),
-    "local_cli_bridge": ("commands", "named_commands", "terminal_phrase", "purpose_phrase"),
-    "post_start_settings": ("primary_sentence", "default_sentence"),
-    "resume_authority": (
-        "durable_authority_phrase",
-        "public_vocabulary_intro",
-        "public_fields",
-        "top_level_boundary_phrase",
-    ),
-    "recovery_ladder": (
-        "title",
-        "local_snapshot_command",
-        "local_snapshot_phrase",
-        "cross_workspace_command",
-        "cross_workspace_phrase",
-        "resume_phrase",
-        "next_phrase",
-        "pause_phrase",
-    ),
-}
-_LOCAL_CLI_NAMED_COMMAND_KEYS = (
-    "help",
-    "doctor",
-    "unattended_readiness",
-    "permissions_status",
-    "permissions_sync",
-    "resume",
-    "resume_recent",
-    "observe_execution",
-    "cost",
-    "presets_list",
-    "integrations_status_wolfram",
-)
-
-
-def _join_backticked_commands(commands: tuple[str, ...]) -> str:
-    rendered = tuple(f"`{command}`" for command in commands)
-    if not rendered:
-        raise ValueError("public surface contract requires at least one local CLI command")
-    if len(rendered) == 1:
-        return rendered[0]
-    if len(rendered) == 2:
-        return f"{rendered[0]} and {rendered[1]}"
-    return ", ".join(rendered[:-1]) + f", and {rendered[-1]}"
-
-
 def _require_object(payload: object, *, label: str) -> dict[str, object]:
     if not isinstance(payload, dict):
         raise ValueError(f"{label} must be a JSON object")
@@ -233,6 +190,166 @@ def _require_allowed_keys(payload: dict[str, object], *, label: str, keys: tuple
         return
     raise ValueError(f"{label} contains unknown key(s): {', '.join(unknown)}")
 
+
+@dataclass(frozen=True, slots=True)
+class PublicSurfaceContractSchema:
+    top_level_keys: tuple[str, ...]
+    section_keys: dict[str, tuple[str, ...]]
+    local_cli_bridge_commands: tuple[str, ...]
+    local_cli_named_command_keys: tuple[str, ...]
+
+
+def _require_schema_string_tuple(value: object, *, label: str) -> tuple[str, ...]:
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{label} must be a non-empty list")
+    items: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f"{label} entries must be non-empty strings")
+        normalized = item.strip()
+        if normalized in seen:
+            raise ValueError(f"{label} must not contain duplicates")
+        seen.add(normalized)
+        items.append(normalized)
+    return tuple(items)
+
+
+@lru_cache(maxsize=1)
+def load_public_surface_contract_schema() -> PublicSurfaceContractSchema:
+    """Load the static schema that governs the public surface contract payload."""
+
+    schema_path = files("gpd.core").joinpath("public_surface_contract_schema.json")
+    raw_payload = json.loads(schema_path.read_text(encoding="utf-8"))
+    payload = _require_object(raw_payload, label="public_surface_contract_schema")
+    _require_present_keys(
+        payload,
+        label="public_surface_contract_schema",
+        keys=("schema_version", "top_level_keys", "sections"),
+    )
+    _require_allowed_keys(
+        payload,
+        label="public_surface_contract_schema",
+        keys=("schema_version", "top_level_keys", "sections"),
+    )
+
+    schema_version = payload.get("schema_version")
+    if not isinstance(schema_version, int) or isinstance(schema_version, bool) or schema_version != 1:
+        raise ValueError(f"Unsupported public surface contract schema_version: {schema_version!r}")
+
+    top_level_keys = _require_schema_string_tuple(
+        payload.get("top_level_keys"),
+        label="public_surface_contract_schema.top_level_keys",
+    )
+    sections_payload = _require_object(payload.get("sections"), label="public_surface_contract_schema.sections")
+    section_names = (
+        "beginner_onboarding",
+        "local_cli_bridge",
+        "post_start_settings",
+        "resume_authority",
+        "recovery_ladder",
+    )
+    _require_present_keys(
+        sections_payload,
+        label="public_surface_contract_schema.sections",
+        keys=section_names,
+    )
+    _require_allowed_keys(
+        sections_payload,
+        label="public_surface_contract_schema.sections",
+        keys=section_names,
+    )
+
+    section_keys: dict[str, tuple[str, ...]] = {}
+    local_cli_bridge_commands: tuple[str, ...] | None = None
+    local_cli_named_command_keys: tuple[str, ...] | None = None
+    section_key_names = {
+        "beginner_onboarding": ("keys",),
+        "local_cli_bridge": ("keys", "commands", "named_commands"),
+        "post_start_settings": ("keys",),
+        "resume_authority": ("keys",),
+        "recovery_ladder": ("keys",),
+    }
+
+    for section_name in section_names:
+        section_payload = _require_object(
+            sections_payload.get(section_name),
+            label=f"public_surface_contract_schema.sections.{section_name}",
+        )
+        allowed_schema_keys = section_key_names[section_name]
+        _require_present_keys(
+            section_payload,
+            label=f"public_surface_contract_schema.sections.{section_name}",
+            keys=allowed_schema_keys,
+        )
+        _require_allowed_keys(
+            section_payload,
+            label=f"public_surface_contract_schema.sections.{section_name}",
+            keys=allowed_schema_keys,
+        )
+        section_keys[section_name] = _require_schema_string_tuple(
+            section_payload.get("keys"),
+            label=f"public_surface_contract_schema.sections.{section_name}.keys",
+        )
+
+        if section_name != "local_cli_bridge":
+            continue
+
+        local_cli_bridge_commands = _require_schema_string_tuple(
+            section_payload.get("commands"),
+            label="public_surface_contract_schema.sections.local_cli_bridge.commands",
+        )
+        named_commands_payload = _require_object(
+            section_payload.get("named_commands"),
+            label="public_surface_contract_schema.sections.local_cli_bridge.named_commands",
+        )
+        _require_present_keys(
+            named_commands_payload,
+            label="public_surface_contract_schema.sections.local_cli_bridge.named_commands",
+            keys=("ordered_keys",),
+        )
+        _require_allowed_keys(
+            named_commands_payload,
+            label="public_surface_contract_schema.sections.local_cli_bridge.named_commands",
+            keys=("ordered_keys",),
+        )
+        local_cli_named_command_keys = _require_schema_string_tuple(
+            named_commands_payload.get("ordered_keys"),
+            label="public_surface_contract_schema.sections.local_cli_bridge.named_commands.ordered_keys",
+        )
+
+    if local_cli_bridge_commands is None or local_cli_named_command_keys is None:
+        raise ValueError("public_surface_contract_schema.local_cli_bridge is incomplete")
+
+    if len(local_cli_bridge_commands) != len(local_cli_named_command_keys):
+        raise ValueError(
+            "public_surface_contract_schema.local_cli_bridge commands and ordered named command keys must stay aligned"
+        )
+
+    return PublicSurfaceContractSchema(
+        top_level_keys=top_level_keys,
+        section_keys=section_keys,
+        local_cli_bridge_commands=local_cli_bridge_commands,
+        local_cli_named_command_keys=local_cli_named_command_keys,
+    )
+
+
+_PUBLIC_SURFACE_CONTRACT_SCHEMA = load_public_surface_contract_schema()
+_PUBLIC_SURFACE_CONTRACT_KEYS = _PUBLIC_SURFACE_CONTRACT_SCHEMA.top_level_keys
+_PUBLIC_SURFACE_SECTION_KEYS = _PUBLIC_SURFACE_CONTRACT_SCHEMA.section_keys
+_LOCAL_CLI_BRIDGE_COMMANDS = _PUBLIC_SURFACE_CONTRACT_SCHEMA.local_cli_bridge_commands
+_LOCAL_CLI_NAMED_COMMAND_KEYS = _PUBLIC_SURFACE_CONTRACT_SCHEMA.local_cli_named_command_keys
+
+
+def _join_backticked_commands(commands: tuple[str, ...]) -> str:
+    rendered = tuple(f"`{command}`" for command in commands)
+    if not rendered:
+        raise ValueError("public surface contract requires at least one local CLI command")
+    if len(rendered) == 1:
+        return rendered[0]
+    if len(rendered) == 2:
+        return f"{rendered[0]} and {rendered[1]}"
+    return ", ".join(rendered[:-1]) + f", and {rendered[-1]}"
 
 def _require_string(payload: dict[str, object], key: str, *, label: str) -> str:
     value = payload.get(key)
@@ -311,6 +428,7 @@ def _require_local_cli_named_commands(
         ),
         cost=_require_string(named_payload, "cost", label="local_cli_bridge.named_commands"),
         presets_list=_require_string(named_payload, "presets_list", label="local_cli_bridge.named_commands"),
+        plan_preflight=_require_string(named_payload, "plan_preflight", label="local_cli_bridge.named_commands"),
         integrations_status_wolfram=_require_string(
             named_payload,
             "integrations_status_wolfram",
@@ -396,7 +514,14 @@ def load_public_surface_contract() -> PublicSurfaceContract:
         keys=_PUBLIC_SURFACE_SECTION_KEYS["recovery_ladder"],
     )
     bridge_commands = _require_string_list(bridge_payload, "commands", label="local_cli_bridge")
+    for command in _LOCAL_CLI_BRIDGE_COMMANDS:
+        _require_exact_command(bridge_commands, label="local_cli_bridge", command=command)
     named_commands = _require_local_cli_named_commands(bridge_payload, bridge_commands=bridge_commands)
+    if bridge_commands != _LOCAL_CLI_BRIDGE_COMMANDS:
+        raise ValueError(
+            "local_cli_bridge.commands must exactly match "
+            "public_surface_contract_schema.sections.local_cli_bridge.commands"
+        )
     recovery_local_snapshot_command = _require_string(
         recovery_payload,
         "local_snapshot_command",
@@ -444,6 +569,26 @@ def load_public_surface_contract() -> PublicSurfaceContract:
             named_commands=named_commands,
             terminal_phrase=_require_string(bridge_payload, "terminal_phrase", label="local_cli_bridge"),
             purpose_phrase=_require_string(bridge_payload, "purpose_phrase", label="local_cli_bridge"),
+            install_local_example=_require_string(
+                bridge_payload,
+                "install_local_example",
+                label="local_cli_bridge",
+            ),
+            doctor_local_command=_require_string(
+                bridge_payload,
+                "doctor_local_command",
+                label="local_cli_bridge",
+            ),
+            doctor_global_command=_require_string(
+                bridge_payload,
+                "doctor_global_command",
+                label="local_cli_bridge",
+            ),
+            validate_command_context_command=_require_string(
+                bridge_payload,
+                "validate_command_context_command",
+                label="local_cli_bridge",
+            ),
         ),
         post_start_settings=PostStartSettingsContract(
             primary_sentence=_require_string(
@@ -544,6 +689,18 @@ def local_cli_doctor_command() -> str:
     return _local_cli_bridge_command(local_cli_bridge_contract().named_commands.doctor)
 
 
+def local_cli_install_local_example_command() -> str:
+    return local_cli_bridge_contract().install_local_example
+
+
+def local_cli_doctor_local_command() -> str:
+    return local_cli_bridge_contract().doctor_local_command
+
+
+def local_cli_doctor_global_command() -> str:
+    return local_cli_bridge_contract().doctor_global_command
+
+
 def local_cli_unattended_readiness_command() -> str:
     return _local_cli_bridge_command(local_cli_bridge_contract().named_commands.unattended_readiness)
 
@@ -576,12 +733,24 @@ def local_cli_presets_list_command() -> str:
     return _local_cli_bridge_command(local_cli_bridge_contract().named_commands.presets_list)
 
 
+def local_cli_plan_preflight_command() -> str:
+    return _local_cli_bridge_command(local_cli_bridge_contract().named_commands.plan_preflight)
+
+
 def local_cli_integrations_status_wolfram_command() -> str:
     return _local_cli_bridge_command(local_cli_bridge_contract().named_commands.integrations_status_wolfram)
 
 
+def local_cli_validate_command_context_command() -> str:
+    return local_cli_bridge_contract().validate_command_context_command
+
+
 def local_cli_bridge_note() -> str:
     return local_cli_bridge_contract().render_note()
+
+
+def local_cli_bridge_purpose_phrase() -> str:
+    return local_cli_bridge_contract().purpose_phrase
 
 
 def post_start_settings_contract() -> PostStartSettingsContract:

@@ -44,14 +44,14 @@ When `gpd --raw validate paper-quality --from-project .` runs, the journal is re
 **Load project context and resolve models:**
 
 ```bash
-INIT=$(gpd init phase-op)
+INIT=$(gpd --raw init phase-op)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
   # STOP — display the error to the user and do not proceed.
 fi
 ```
 
-Parse JSON for: `commit_docs`, `state_exists`, `project_exists`, `project_contract`, `project_contract_gate`, `project_contract_load_info`, `project_contract_validation`, `selected_protocol_bundle_ids`, `protocol_bundle_context`, `active_reference_context`, `derived_manuscript_reference_status`, `derived_manuscript_reference_status_count`.
+Parse JSON for: `commit_docs`, `state_exists`, `project_exists`, `project_contract`, `project_contract_gate`, `project_contract_load_info`, `project_contract_validation`, `selected_protocol_bundle_ids`, `protocol_bundle_context`, `active_reference_context`, `derived_manuscript_reference_status`, `derived_manuscript_reference_status_count`, `derived_manuscript_proof_review_status`.
 
 **Load mode settings:**
 
@@ -86,6 +86,7 @@ gpd validate review-preflight write-paper --strict
 ```
 
 If review preflight exits nonzero because of missing project state, missing roadmap, degraded review integrity, missing research artifacts, or non-review-ready reproducibility coverage, STOP and show the blocking issues before drafting. Keep the current `project_contract`, `project_contract_gate`, `project_contract_load_info`, `project_contract_validation`, and `active_reference_context` visible throughout the staged review; the contract is authoritative only when `project_contract_gate.authoritative` is true.
+If `derived_manuscript_proof_review_status` is present, use it as the first-pass manuscript-local summary of proof-review freshness for theorem-bearing results; keep passed proof-redteam artifacts authoritative for strict drafting decisions.
 For any resumed manuscript, strict preflight reads `ARTIFACT-MANIFEST.json`, `BIBLIOGRAPHY-AUDIT.json`, and `reproducibility-manifest.json` from the resolved manuscript directory itself. The strict gate also requires `bibliography_audit_clean` and `reproducibility_ready`, not just file presence. Do not satisfy that gate with legacy publication artifacts from a different manuscript directory when the active manuscript lives elsewhere.
 If the manuscript depends on any theorem-style or `proof_obligation` result, treat passed proof-redteam artifacts from the source phases as mandatory review inputs. Missing or open proof audits are CRITICAL blockers, not polish issues.
 
@@ -661,7 +662,6 @@ task(
 ```
 
 **If a writer agent fails to spawn or returns an error:** Check if the expected .tex file was written to `${PAPER_DIR}/` (agents write files first). If the file exists, proceed to the next section. If not, offer: 1) Retry the failed section, 2) Draft the section in the main context using the section brief, 3) Skip the section and continue with remaining waves. Do not block the entire paper on a single section failure — other sections can still be drafted in parallel.
-Default bootstrap wording: `Check if the expected .tex file was written to `${PAPER_DIR}/``. If the file exists, proceed to the next section.
 
 **Each writer agent receives:**
 
@@ -887,7 +887,6 @@ Return BIBLIOGRAPHY UPDATED or CITATION ISSUES FOUND."
 - Add missing citations identified by the bibliographer
 - Re-run the audit if substantial changes were made
 - Re-run `gpd paper-build` after bibliography changes so `${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json` and the derived reference bridge are regenerated before entering strict review or `pre_submission_review`.
-  Default bootstrap wording: rerun `paper-build` so `${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json` is current before strict review or `pre_submission_review`.
 
 **If BIBLIOGRAPHY UPDATED:**
 
@@ -920,7 +919,6 @@ Minimum required inputs:
 - contract-backed summary-artifact / `VERIFICATION.md` evidence for decisive claims, figures, and comparisons
 
 `gpd paper-build` must have regenerated `${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json` for the current bibliography before building the reproducibility manifest. Stale bibliography audits are not acceptable review inputs.
-  Default bootstrap wording: rerun `paper-build` so `${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json` is current before building the reproducibility manifest.
 
 Validate it before entering strict review:
 

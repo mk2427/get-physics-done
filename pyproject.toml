@@ -75,6 +75,7 @@ packages = ["src/gpd"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = "-n auto"
 markers = []
 
 [tool.ruff]
@@ -94,4 +95,5 @@ dev = [
     "pytest-asyncio>=1.3.0",
     "pytest-xdist>=3.8.0",
     "ruff>=0.15.5",
+    "sympy>=1.14.0",
 ]

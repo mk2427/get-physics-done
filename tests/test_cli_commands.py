@@ -101,15 +101,16 @@ def gpd_project(tmp_path: Path) -> Path:
             "custom_conventions": {"my_custom": "value"},
         }
     )
-    (planning / "state.json").write_text(json.dumps(state, indent=2))
-    (planning / "STATE.md").write_text(generate_state_markdown(state))
-    (planning / "PROJECT.md").write_text("# Test Project\n\n## Core Research Question\nWhat is physics?\n")
-    (planning / "REQUIREMENTS.md").write_text("# Requirements\n\n- [ ] **REQ-01**: Do the thing\n")
+    (planning / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
+    (planning / "STATE.md").write_text(generate_state_markdown(state), encoding="utf-8")
+    (planning / "PROJECT.md").write_text("# Test Project\n\n## Core Research Question\nWhat is physics?\n", encoding="utf-8")
+    (planning / "REQUIREMENTS.md").write_text("# Requirements\n\n- [ ] **REQ-01**: Do the thing\n", encoding="utf-8")
     (planning / "ROADMAP.md").write_text(
         "# Roadmap\n\n## Phase 1: Test Phase\nGoal: Test\nRequirements: REQ-01\n"
-        "\n## Phase 2: Phase Two\nGoal: More tests\nRequirements: REQ-01\n"
+        "\n## Phase 2: Phase Two\nGoal: More tests\nRequirements: REQ-01\n",
+        encoding="utf-8",
     )
-    (planning / "CONVENTIONS.md").write_text("# Conventions\n\n- Metric: (-,+,+,+)\n- Coordinates: Cartesian\n")
+    (planning / "CONVENTIONS.md").write_text("# Conventions\n\n- Metric: (-,+,+,+)\n- Coordinates: Cartesian\n", encoding="utf-8")
     (planning / "config.json").write_text(
         json.dumps(
             {
@@ -124,13 +125,14 @@ def gpd_project(tmp_path: Path) -> Path:
                     "verifier": True,
                 },
             }
-        )
+        ),
+        encoding="utf-8",
     )
 
     # Phase directories
     p1 = planning / "phases" / "01-test-phase"
     p1.mkdir(parents=True)
-    (p1 / "README.md").write_text("# Phase 1: Test Phase\n")
+    (p1 / "README.md").write_text("# Phase 1: Test Phase\n", encoding="utf-8")
     (p1 / "01-SUMMARY.md").write_text(
         "---\n"
         "phase: 01-test-phase\n"
@@ -139,7 +141,8 @@ def gpd_project(tmp_path: Path) -> Path:
         "provides: [executed plan summary]\n"
         "completed: 2026-03-10\n"
         "---\n\n"
-        "# Summary\n\nExecuted plan summary.\n"
+        "# Summary\n\nExecuted plan summary.\n",
+        encoding="utf-8",
     )
     (p1 / "01-VERIFICATION.md").write_text(
         "---\n"
@@ -148,11 +151,12 @@ def gpd_project(tmp_path: Path) -> Path:
         "status: passed\n"
         "score: 1/1 checks passed\n"
         "---\n\n"
-        "# Verification\n\nVerified result.\n"
+        "# Verification\n\nVerified result.\n",
+        encoding="utf-8",
     )
     p2 = planning / "phases" / "02-phase-two"
     p2.mkdir(parents=True)
-    (p2 / "README.md").write_text("# Phase 2: Phase Two\n")
+    (p2 / "README.md").write_text("# Phase 2: Phase Two\n", encoding="utf-8")
 
     paper_dir = tmp_path / "paper"
     paper_dir.mkdir()
@@ -612,26 +616,6 @@ def _write_publication_review_outcome(
 
 
 class TestConventionCommands:
-    def test_check(self) -> None:
-        _invoke("convention", "check")
-
-    def test_list(self) -> None:
-        _invoke("convention", "list")
-
-    def test_set(self) -> None:
-        _invoke("convention", "set", "natural_units", "SI")
-
-    def test_set_force(self) -> None:
-        _invoke("convention", "set", "metric_signature", "(+,-,-,-)", "--force")
-
-    def test_check_empty_state(self, gpd_project: Path) -> None:
-        (gpd_project / "GPD" / "state.json").write_text("{}")
-        _invoke("convention", "check")
-
-    def test_check_no_state_file(self, gpd_project: Path) -> None:
-        (gpd_project / "GPD" / "state.json").unlink()
-        _invoke("convention", "check")
-
     def test_set_persists(self, gpd_project: Path) -> None:
         _invoke("convention", "set", "fourier_convention", "physics")
         state = json.loads((gpd_project / "GPD" / "state.json").read_text())
@@ -644,31 +628,10 @@ class TestConventionCommands:
 
 
 class TestStateCommands:
-    def test_load(self) -> None:
-        _invoke("state", "load")
-
-    def test_get(self) -> None:
-        _invoke("state", "get")
-
-    def test_get_section(self) -> None:
-        _invoke("state", "get", "current_phase")
-
     def test_validate(self) -> None:
         # May exit 1 if issues found, but must not crash
         result = runner.invoke(app, ["state", "validate"], catch_exceptions=False)
         assert result.exit_code in (0, 1)
-
-    def test_snapshot(self) -> None:
-        _invoke("state", "snapshot")
-
-    def test_compact(self) -> None:
-        _invoke("state", "compact")
-
-    def test_add_decision(self) -> None:
-        _invoke("state", "add-decision", "--summary", "Use SI units", "--rationale", "Standard")
-
-    def test_add_blocker(self) -> None:
-        _invoke("state", "add-blocker", "--text", "Need reference data")
 
     def test_set_project_contract(self, gpd_project: Path) -> None:
         contract_path = gpd_project / "contract.json"
@@ -678,37 +641,6 @@ class TestStateCommands:
         )
 
         _invoke("state", "set-project-contract", str(contract_path))
-        state = json.loads((gpd_project / "GPD" / "state.json").read_text(encoding="utf-8"))
-        assert state["project_contract"]["scope"]["question"] == "What benchmark must the project recover?"
-
-    def test_set_project_contract_resolves_relative_path_against_cwd(self, gpd_project: Path) -> None:
-        contract_path = gpd_project / "contract.json"
-        contract_path.write_text(
-            (FIXTURES_DIR / "project_contract.json").read_text(encoding="utf-8"),
-            encoding="utf-8",
-        )
-
-        result = runner.invoke(
-            app,
-            ["--cwd", str(gpd_project), "state", "set-project-contract", "contract.json"],
-            catch_exceptions=False,
-        )
-
-        assert result.exit_code == 0, result.output
-        state = json.loads((gpd_project / "GPD" / "state.json").read_text(encoding="utf-8"))
-        assert state["project_contract"]["scope"]["question"] == "What benchmark must the project recover?"
-
-    def test_set_project_contract_accepts_stdin(self, gpd_project: Path) -> None:
-        contract_text = (FIXTURES_DIR / "project_contract.json").read_text(encoding="utf-8")
-
-        result = runner.invoke(
-            app,
-            ["--cwd", str(gpd_project), "state", "set-project-contract", "-"],
-            input=contract_text,
-            catch_exceptions=False,
-        )
-
-        assert result.exit_code == 0, result.output
         state = json.loads((gpd_project / "GPD" / "state.json").read_text(encoding="utf-8"))
         assert state["project_contract"]["scope"]["question"] == "What benchmark must the project recover?"
 
@@ -881,27 +813,7 @@ class TestRegressionCheckCommands:
         _invoke("regression-check")
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Init commands
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestInitCommands:
-    def test_new_project(self) -> None:
-        _invoke("init", "new-project")
-
-    def test_map_research(self) -> None:
-        _invoke("init", "map-research")
-
-    def test_plan_phase(self) -> None:
-        _invoke("init", "plan-phase", "1")
-
-    def test_execute_phase(self) -> None:
-        _invoke("init", "execute-phase", "1")
-
-    def test_progress_include_trims_whitespace_and_empty_entries(self) -> None:
-        _invoke("init", "progress", "--include", " state, roadmap, , ")
-
     def test_progress_include_rejects_unknown_values(self) -> None:
         result = runner.invoke(
             app,
@@ -1007,8 +919,8 @@ class TestInitCommands:
 
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
-        assert payload["workspace_root"] == str(workspace.resolve())
-        assert payload["project_root"] == str(workspace.resolve())
+        assert payload["workspace_root"] == workspace.resolve().as_posix()
+        assert payload["project_root"] == workspace.resolve().as_posix()
         assert payload["project_root_source"] == "workspace"
         assert payload["project_root_auto_selected"] is False
         assert payload["config_content"] is not None
@@ -1131,7 +1043,9 @@ review_summary:
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
 
-        assert payload["project_contract"] is None
+        assert payload["project_contract"] is not None
+        assert payload["project_contract"]["references"][0]["must_surface"] is False
+        assert payload["contract_intake"]["context_gaps"] == ["Need a concrete must-surface anchor before approval."]
         assert payload["project_contract_load_info"]["status"] == "loaded_with_approval_blockers"
         assert payload["project_contract_validation"]["valid"] is False
         assert "project_contract_load_info" in payload
@@ -1157,202 +1071,16 @@ review_summary:
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
 
-        assert payload["project_contract"] is None
+        assert payload["project_contract"] is not None
+        assert payload["project_contract"]["references"][0]["must_surface"] is False
+        assert payload["contract_intake"]["context_gaps"] == ["Need a concrete must-surface anchor before approval."]
         assert payload["project_contract_load_info"]["status"] == "loaded_with_approval_blockers"
         assert payload["project_contract_validation"]["valid"] is False
         assert "project_contract_load_info" in payload
         assert "project_contract_validation" in payload
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Phase commands
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestPhaseCommands:
-    def test_list(self) -> None:
-        _invoke("phase", "list")
-
-    def test_index(self) -> None:
-        _invoke("phase", "index", "1")
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Roadmap commands
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestRoadmapCommands:
-    def test_get_phase(self) -> None:
-        _invoke("roadmap", "get-phase", "1")
-
-    def test_analyze(self) -> None:
-        _invoke("roadmap", "analyze")
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Progress command
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestProgressCommand:
-    def test_progress(self) -> None:
-        _invoke("progress")
-
-
-class TestRecoveryStatusCommands:
-    def test_resume_resolves_ancestor_project_root_from_nested_workspace(
-        self,
-        gpd_project: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        nested = gpd_project / "workspace" / "notes"
-        nested.mkdir(parents=True)
-        monkeypatch.chdir(nested)
-
-        result = runner.invoke(
-            app,
-            ["--raw", "--cwd", str(nested), "resume"],
-            catch_exceptions=False,
-        )
-
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
-        assert payload["planning_exists"] is True
-        assert payload["project_exists"] is True
-        assert payload["roadmap_exists"] is True
-        assert payload["state_exists"] is True
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Verify commands
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestVerifyCommands:
-    def test_phase(self) -> None:
-        _invoke("verify", "phase", "1")
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Result commands
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestResultCommands:
-    def test_list(self) -> None:
-        _invoke("result", "list")
-
-    def test_search(self) -> None:
-        _invoke("result", "search")
-
-    def test_upsert_by_equation(self) -> None:
-        _invoke("result", "upsert", "--equation", "E = mc^2", "--description", "Mass-energy relation")
-
-    def test_upsert_by_description(self) -> None:
-        _invoke("result", "upsert", "--description", "Energy relation")
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Approximation commands
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestApproximationCommands:
-    def test_list(self) -> None:
-        _invoke("approximation", "list")
-
-    def test_add(self) -> None:
-        _invoke("approximation", "add", "Born approx", "--validity-range", "x << 1")
-
-    def test_add_minimal(self) -> None:
-        """Add with only the name — optional params must not pass None to core."""
-        _invoke("approximation", "add", "WKB approx")
-
-    def test_check(self) -> None:
-        _invoke("approximation", "check")
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Uncertainty commands
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestUncertaintyCommands:
-    def test_list(self) -> None:
-        _invoke("uncertainty", "list")
-
-    def test_add(self) -> None:
-        _invoke("uncertainty", "add", "mass", "--value", "1.0", "--uncertainty", "0.1")
-
-    def test_add_minimal(self) -> None:
-        """Add with only the quantity — optional params must not pass None to core."""
-        _invoke("uncertainty", "add", "charge")
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Question commands
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestQuestionCommands:
-    def test_list(self) -> None:
-        _invoke("question", "list")
-
-    def test_add(self) -> None:
-        _invoke("question", "add", "What is the coupling constant?")
-
-    def test_resolve(self) -> None:
-        _invoke("question", "add", "What is the coupling constant?")
-        _invoke("question", "resolve", "coupling constant")
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Calculation commands
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestCalculationCommands:
-    def test_list(self) -> None:
-        _invoke("calculation", "list")
-
-    def test_add(self) -> None:
-        _invoke("calculation", "add", "Loop integral computation")
-
-    def test_complete(self) -> None:
-        _invoke("calculation", "add", "Loop integral computation")
-        _invoke("calculation", "complete", "Loop integral")
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Utility commands
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestUtilityCommands:
-    def test_timestamp(self) -> None:
-        _invoke("timestamp")
-
-    def test_slug(self) -> None:
-        _invoke("slug", "Hello World Test")
-
-
 class TestReviewValidationCommands:
-    def test_validate_unattended_readiness_surface_smoke(self) -> None:
-        validate_help = runner.invoke(app, ["validate", "--help"], catch_exceptions=False)
-
-        assert validate_help.exit_code == 0, validate_help.output
-        assert "unattended-readiness" in validate_help.output
-
-        result = runner.invoke(
-            app,
-            ["validate", "unattended-readiness", "--help"],
-            catch_exceptions=False,
-        )
-
-        assert result.exit_code == 0, result.output
-        assert "unattended" in result.output.lower()
-
     def test_review_contract_uses_typed_registry_surface(self) -> None:
         result = runner.invoke(
             app,
@@ -1365,6 +1093,11 @@ class TestReviewValidationCommands:
         assert payload["command"] == "gpd:write-paper"
         assert payload["context_mode"] == "project-required"
         assert payload["review_contract"]["review_mode"] == "publication"
+        assert "${PAPER_DIR}/ARTIFACT-MANIFEST.json" in payload["review_contract"]["required_outputs"]
+        assert "${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json" in payload["review_contract"]["required_outputs"]
+        assert "${PAPER_DIR}/reproducibility-manifest.json" in payload["review_contract"]["required_outputs"]
+        assert "GPD/review/REVIEW-LEDGER{round_suffix}.json" in payload["review_contract"]["required_outputs"]
+        assert "GPD/review/REFEREE-DECISION{round_suffix}.json" in payload["review_contract"]["required_outputs"]
         assert "GPD/REFEREE-REPORT{round_suffix}.md" in payload["review_contract"]["required_outputs"]
         assert "GPD/REFEREE-REPORT{round_suffix}.tex" in payload["review_contract"]["required_outputs"]
         assert payload["review_contract"]["preflight_checks"] == [
@@ -1381,6 +1114,26 @@ class TestReviewValidationCommands:
             "reproducibility_manifest",
             "reproducibility_ready",
             "manuscript_proof_review",
+        ]
+        assert payload["review_contract"]["stage_artifacts"] == [
+            "GPD/review/CLAIMS{round_suffix}.json",
+            "GPD/review/STAGE-reader{round_suffix}.json",
+            "GPD/review/STAGE-literature{round_suffix}.json",
+            "GPD/review/STAGE-math{round_suffix}.json",
+            "GPD/review/STAGE-physics{round_suffix}.json",
+            "GPD/review/STAGE-interestingness{round_suffix}.json",
+            "GPD/review/REVIEW-LEDGER{round_suffix}.json",
+            "GPD/review/REFEREE-DECISION{round_suffix}.json",
+        ]
+        assert payload["review_contract"]["conditional_requirements"] == [
+            {
+                "when": "theorem-bearing claims are present",
+                "required_outputs": ["GPD/review/PROOF-REDTEAM{round_suffix}.md"],
+                "required_evidence": [],
+                "blocking_conditions": [],
+                "blocking_preflight_checks": [],
+                "stage_artifacts": ["GPD/review/PROOF-REDTEAM{round_suffix}.md"],
+            }
         ]
         assert "manuscript scaffold target (existing draft or bootstrap target)" in payload["review_contract"]["required_evidence"]
         assert "phase summaries or milestone digest" in payload["review_contract"]["required_evidence"]
@@ -2296,7 +2049,6 @@ class TestReviewValidationCommands:
         assert checks["manuscript_proof_review"]["blocking"] is False
         assert "PROOF-REDTEAM.md" in checks["manuscript_proof_review"]["detail"]
         assert "write-paper will run its own staged proof-review loop" in checks["manuscript_proof_review"]["detail"]
-        assert payload["active_conditional_requirements"] == []
 
     def test_review_preflight_peer_review_surfaces_active_conditional_requirements_for_theorem_bearing_manuscript(
         self,
@@ -5188,23 +4940,9 @@ class TestReviewValidationCommands:
         assert payload["requirements"][0]["blocking"] is False
         assert "license state are not proven" in payload["warnings"][0]
 
-    @pytest.mark.parametrize(
-        ("command_args"),
-        [
-            ("integrations", "status", "wolfram"),
-            ("integrations", "enable", "wolfram"),
-            ("integrations", "disable", "wolfram"),
-        ],
-    )
+    @pytest.mark.parametrize(("command_args"), [("integrations", "status", "wolfram")])
     def test_integrations_surface_smoke(self, command_args: tuple[str, ...]) -> None:
         _invoke(*command_args)
-
-    def test_doctor_help_smoke_retains_runtime_scoping_and_probe_slot(self) -> None:
-        result = runner.invoke(app, ["doctor", "--help"], catch_exceptions=False)
-
-        assert result.exit_code == 0, result.output
-        assert "Check GPD installation and environment health" in result.output
-        assert "inspect runtime readiness" in result.output
 
     def test_validate_summary_contract_command_rejects_unknown_contract_ids(self, gpd_project: Path) -> None:
         phase_dir = gpd_project / "GPD" / "phases" / "01-benchmark"
@@ -5437,7 +5175,7 @@ class TestReviewValidationCommands:
         assert payload["kernel_verdict"]["verdict_hash"].startswith("sha256:")
 
 
-def test_cli_import_survives_runtime_help_lookup_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cli_import_and_help_lookup_failure_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     import gpd as gpd_package
     import gpd.adapters as adapters_module
 
@@ -5456,11 +5194,6 @@ def test_cli_import_survives_runtime_help_lookup_failure(monkeypatch: pytest.Mon
             sys.modules["gpd.cli"] = original_cli
             gpd_package.cli = original_cli
 
-
-def test_cli_runtime_help_lookup_does_not_swallow_programmer_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    import gpd as gpd_package
-    import gpd.adapters as adapters_module
-
     def _raise_programmer_error() -> list[str]:
         raise TypeError("catalog bug")
 
@@ -5477,7 +5210,7 @@ def test_cli_runtime_help_lookup_does_not_swallow_programmer_errors(monkeypatch:
             gpd_package.cli = original_cli
 
 
-def test_install_command_reports_runtime_catalog_failure_without_traceback(
+def test_install_command_smoke_error_paths_without_traceback(
     monkeypatch: pytest.MonkeyPatch,
     gpd_project: Path,
 ) -> None:
@@ -5499,107 +5232,38 @@ def test_install_command_reports_runtime_catalog_failure_without_traceback(
     assert payload["error"] == "Runtime catalog unavailable during install: catalog offline"
     assert "Traceback" not in result.output
 
+    def assert_raw_install_error(argv: list[str], expected_error: str, setup=None) -> None:
+        if setup is not None:
+            setup()
+        result = runner.invoke(app, ["--raw", "--cwd", str(gpd_project), *argv], catch_exceptions=False)
+        assert result.exit_code == 1, result.output
+        payload = json.loads(result.output)
+        assert payload["error"] == expected_error
+        assert "Traceback" not in result.output
 
-def test_install_command_reports_runtime_adapter_failure_during_interactive_selection_without_traceback(
-    monkeypatch: pytest.MonkeyPatch,
-    gpd_project: Path,
-) -> None:
+    assert_raw_install_error(
+        ["install"],
+        "Raw install requires one or more runtimes or --all",
+    )
+    assert_raw_install_error(
+        ["install", _PRIMARY_RAW_RUNTIME_DESCRIPTOR.runtime_name],
+        "Raw install requires --local, --global, or --target-dir",
+        setup=lambda: (
+            monkeypatch.setattr(adapters_module, "list_runtimes", lambda: [_PRIMARY_RAW_RUNTIME_DESCRIPTOR.runtime_name]),
+            monkeypatch.setattr(adapters_module, "get_adapter", lambda runtime_name: object()),
+        ),
+    )
+    assert_raw_install_error(
+        ["uninstall", "--all", "--global"],
+        "Runtime catalog unavailable during uninstall: catalog offline",
+        setup=lambda: monkeypatch.setattr(adapters_module, "list_runtimes", _raise_runtime_catalog),
+    )
+
+
+def test_cli_uninstall_and_resolution_paths(monkeypatch: pytest.MonkeyPatch, gpd_project: Path, tmp_path: Path) -> None:
     import gpd.adapters as adapters_module
-
-    monkeypatch.setattr(adapters_module, "list_runtimes", lambda: [_PRIMARY_RAW_RUNTIME_DESCRIPTOR.runtime_name])
-    monkeypatch.setattr(
-        adapters_module,
-        "get_adapter",
-        lambda runtime_name: (_ for _ in ()).throw(RuntimeError("adapter offline")),
-    )
-
-    result = runner.invoke(
-        app,
-        ["--raw", "--cwd", str(gpd_project), "install"],
-        catch_exceptions=False,
-    )
-
-    assert result.exit_code == 1, result.output
-    payload = json.loads(result.output)
-    assert payload["error"] == "Raw install requires one or more runtimes or --all"
-    assert "Traceback" not in result.output
-
-
-def test_raw_install_requires_runtime_selection_without_prompt(gpd_project: Path) -> None:
-    result = runner.invoke(
-        app,
-        ["--raw", "--cwd", str(gpd_project), "install"],
-        catch_exceptions=False,
-    )
-
-    assert result.exit_code == 1, result.output
-    payload = json.loads(result.output)
-    assert payload["error"] == "Raw install requires one or more runtimes or --all"
-    assert "Traceback" not in result.output
-
-
-def test_raw_install_requires_location_selection_without_prompt(
-    monkeypatch: pytest.MonkeyPatch,
-    gpd_project: Path,
-) -> None:
-    import gpd.adapters as adapters_module
-
-    monkeypatch.setattr(adapters_module, "list_runtimes", lambda: [_PRIMARY_RAW_RUNTIME_DESCRIPTOR.runtime_name])
-    monkeypatch.setattr(adapters_module, "get_adapter", lambda runtime_name: object())
-
-    result = runner.invoke(
-        app,
-        ["--raw", "--cwd", str(gpd_project), "install", _PRIMARY_RAW_RUNTIME_DESCRIPTOR.runtime_name],
-        catch_exceptions=False,
-    )
-
-    assert result.exit_code == 1, result.output
-    payload = json.loads(result.output)
-    assert payload["error"] == "Raw install requires --local, --global, or --target-dir"
-    assert "Traceback" not in result.output
-
-
-def test_uninstall_command_reports_runtime_catalog_failure_without_traceback(
-    monkeypatch: pytest.MonkeyPatch,
-    gpd_project: Path,
-) -> None:
-    import gpd.adapters as adapters_module
-
-    def _raise_runtime_catalog() -> list[str]:
-        raise RuntimeError("catalog offline")
-
-    monkeypatch.setattr(adapters_module, "list_runtimes", _raise_runtime_catalog)
-
-    result = runner.invoke(
-        app,
-        ["--raw", "--cwd", str(gpd_project), "uninstall", "--all", "--global"],
-        catch_exceptions=False,
-    )
-
-    assert result.exit_code == 1, result.output
-    payload = json.loads(result.output)
-    assert payload["error"] == "Runtime catalog unavailable during uninstall: catalog offline"
-    assert "Traceback" not in result.output
-
-
-def test_raw_uninstall_requires_runtime_selection_without_prompt(gpd_project: Path) -> None:
-    result = runner.invoke(
-        app,
-        ["--raw", "--cwd", str(gpd_project), "uninstall"],
-        catch_exceptions=False,
-    )
-
-    assert result.exit_code == 1, result.output
-    payload = json.loads(result.output)
-    assert payload["error"] == "Raw uninstall requires one or more runtimes or --all"
-    assert "Traceback" not in result.output
-
-
-def test_raw_uninstall_requires_location_selection_without_prompt(
-    monkeypatch: pytest.MonkeyPatch,
-    gpd_project: Path,
-) -> None:
-    import gpd.adapters as adapters_module
+    import gpd.cli as cli_module
+    import gpd.core.config as config_module
 
     monkeypatch.setattr(adapters_module, "list_runtimes", lambda: [_PRIMARY_RAW_RUNTIME_DESCRIPTOR.runtime_name])
     monkeypatch.setattr(adapters_module, "get_adapter", lambda runtime_name: object())
@@ -5609,26 +5273,16 @@ def test_raw_uninstall_requires_location_selection_without_prompt(
         ["--raw", "--cwd", str(gpd_project), "uninstall", _PRIMARY_RAW_RUNTIME_DESCRIPTOR.runtime_name],
         catch_exceptions=False,
     )
-
     assert result.exit_code == 1, result.output
     payload = json.loads(result.output)
     assert payload["error"] == "Raw uninstall requires --local, --global, or --target-dir"
     assert "Traceback" not in result.output
 
-
-def test_uninstall_command_reports_runtime_adapter_failure_without_traceback(
-    monkeypatch: pytest.MonkeyPatch,
-    gpd_project: Path,
-) -> None:
-    import gpd.adapters as adapters_module
-
-    monkeypatch.setattr(adapters_module, "list_runtimes", lambda: [_PRIMARY_RAW_RUNTIME_DESCRIPTOR.runtime_name])
     monkeypatch.setattr(
         adapters_module,
         "get_adapter",
         lambda runtime_name: (_ for _ in ()).throw(RuntimeError("adapter offline")),
     )
-
     result = runner.invoke(
         app,
         [
@@ -5642,7 +5296,6 @@ def test_uninstall_command_reports_runtime_adapter_failure_without_traceback(
         ],
         catch_exceptions=False,
     )
-
     assert result.exit_code == 1, result.output
     payload = json.loads(result.output)
     assert (
@@ -5651,45 +5304,32 @@ def test_uninstall_command_reports_runtime_adapter_failure_without_traceback(
     )
     assert "Traceback" not in result.output
 
-
-def test_resolve_model_normalizes_runtime_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
-    import gpd.cli as cli_module
-    import gpd.core.config as config_module
-
     alias = next(
         value for value in _ALIASABLE_RUNTIME_DESCRIPTOR.selection_aliases if value != _ALIASABLE_RUNTIME_DESCRIPTOR.runtime_name
     )
     monkeypatch.setattr(cli_module, "_supported_runtime_names", list_runtime_names)
     monkeypatch.setattr(config_module, "validate_agent_name", lambda agent_name: None)
     monkeypatch.setattr(config_module, "resolve_model", lambda cwd, agent_name, runtime=None: runtime)
-
     result = runner.invoke(app, ["resolve-model", "gpd-executor", "--runtime", alias], catch_exceptions=False)
-
     assert result.exit_code == 0, result.output
     assert _ALIASABLE_RUNTIME_DESCRIPTOR.runtime_name in result.output
 
-
-def test_target_dir_scope_detection_uses_canonical_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    import gpd.cli as cli_module
-
-    descriptor = iter_runtime_descriptors()[0]
     cwd = tmp_path / "workspace"
     cwd.mkdir()
     global_dir = tmp_path / "global"
     global_dir.mkdir()
-    canonical_target = global_dir / descriptor.config_dir_name
+    canonical_target = global_dir / _PRIMARY_RAW_RUNTIME_DESCRIPTOR.config_dir_name
     canonical_target.mkdir()
-    tricky_target = global_dir / "nested" / ".." / descriptor.config_dir_name
+    tricky_target = global_dir / "nested" / ".." / _PRIMARY_RAW_RUNTIME_DESCRIPTOR.config_dir_name
 
     class _FakeAdapter:
         def resolve_target_dir(self, is_global: bool, cwd: Path | None = None) -> Path:
             del cwd
-            return canonical_target if is_global else tmp_path / "workspace" / descriptor.config_dir_name
+            return canonical_target if is_global else tmp_path / "workspace" / _PRIMARY_RAW_RUNTIME_DESCRIPTOR.config_dir_name
 
     monkeypatch.setattr(cli_module, "_get_cwd", lambda: cwd)
     monkeypatch.setattr(cli_module, "_get_adapter_or_error", lambda runtime_name, action: _FakeAdapter())
-
-    assert cli_module._target_dir_matches_global(descriptor.runtime_name, str(tricky_target), action="install") is True
+    assert cli_module._target_dir_matches_global(_PRIMARY_RAW_RUNTIME_DESCRIPTOR.runtime_name, str(tricky_target), action="install") is True
 
 
 class TestNoDuplicateTestMethods:

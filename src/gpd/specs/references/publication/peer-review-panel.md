@@ -5,6 +5,7 @@ load_when:
   - "referee adjudication"
   - "review stage artifact"
   - "journal fit"
+type: peer-review-panel-protocol
 tier: 2
 context_cost: medium
 ---
@@ -141,8 +142,8 @@ Every stage report should be compact and machine-readable, matching the staged-r
 {
   "version": 1,
   "round": 1,
-  "stage_id": "reader | literature | math | physics | interestingness",
-  "stage_kind": "reader | literature | math | physics | interestingness",
+  "stage_id": "reader",
+  "stage_kind": "reader",
   "manuscript_path": "paper/topic_stem.tex",
   "manuscript_sha256": "<sha256>",
   "claims_reviewed": ["CLM-001"],
@@ -152,12 +153,12 @@ Every stage report should be compact and machine-readable, matching the staged-r
     {
       "issue_id": "REF-001",
       "claim_ids": ["CLM-001"],
-      "severity": "critical | major | minor | suggestion",
+      "severity": "major",
       "summary": "What is wrong",
       "rationale": "Why it is wrong",
       "evidence_refs": ["paper/topic_stem.tex#Conclusion"],
       "manuscript_locations": ["paper/topic_stem.tex:42"],
-      "support_status": "supported | partially_supported | unsupported | unclear",
+      "support_status": "partially_supported",
       "blocking": true,
       "required_action": "What must change"
     }
@@ -175,8 +176,8 @@ Every stage report should be compact and machine-readable, matching the staged-r
       "notes": "The proof establishes the r_0 = 0 case only."
     }
   ],
-  "confidence": "high | medium | low",
-  "recommendation_ceiling": "accept | minor_revision | major_revision | reject"
+  "confidence": "medium",
+  "recommendation_ceiling": "major_revision"
 }
 ```
 
@@ -217,8 +218,8 @@ Stage 1 `CLAIMS{round_suffix}.json` must follow this compact `ClaimIndex` shape:
   "claims": [
     {
       "claim_id": "CLM-001",
-      "claim_type": "main_result | novelty | significance | physical_interpretation | generality | method",
-      "claim_kind": "theorem | lemma | corollary | proposition | result | claim | other",
+      "claim_type": "main_result",
+      "claim_kind": "theorem",
       "text": "Exact manuscript claim text or faithful paraphrase",
       "artifact_path": "paper/topic_stem.tex",
       "section": "Conclusion",
@@ -237,6 +238,7 @@ Stage 1 `CLAIMS{round_suffix}.json` must follow this compact `ClaimIndex` shape:
 - `manuscript_sha256` must be the lowercase 64-hex digest for the exact manuscript snapshot under review.
 - `ClaimIndex` and every nested `ClaimRecord` use a closed schema; do not invent extra keys beyond those shown here.
 - `claim_id` must match `CLM-[A-Za-z0-9][A-Za-z0-9_-]*`.
+- `claim_type` must use exactly: `main_result`, `novelty`, `significance`, `physical_interpretation`, `generality`, `method`.
 - `claim_kind` must use exactly: `theorem`, `lemma`, `corollary`, `proposition`, `result`, `claim`, `other`.
 - Keep `section` as an empty string and `equation_refs`, `figure_refs`, `supporting_artifacts` as empty lists when unavailable.
 - Keep `theorem_assumptions` and `theorem_parameters` as arrays even when unavailable.

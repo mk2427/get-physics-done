@@ -183,14 +183,14 @@ def test_ordered_todo_lookup_candidates_prefers_nested_workspace_local_install_o
 ) -> None:
     project = tmp_path / "project"
     (project / "GPD").mkdir(parents=True)
+    (project / "GPD" / "state.json").write_text("{}", encoding="utf-8")
     nested = project / "src" / "notes"
     nested.mkdir(parents=True)
     home = tmp_path / "home"
     home.mkdir()
     _mark_complete_install(nested / ".codex", runtime="codex")
 
-    with patch("gpd.hooks.runtime_detect.Path.home", return_value=home):
-        candidates = ordered_todo_lookup_candidates(hook_file=__file__, cwd=str(nested))
+    candidates = ordered_todo_lookup_candidates(hook_file=__file__, cwd=str(nested), home=home)
 
     assert candidates[0].path == nested / ".codex" / "todos"
 
@@ -200,14 +200,14 @@ def test_ordered_todo_lookup_candidates_falls_back_to_ancestor_project_root_inst
 ) -> None:
     project = tmp_path / "project"
     (project / "GPD").mkdir(parents=True)
+    (project / "GPD" / "state.json").write_text("{}", encoding="utf-8")
     nested = project / "src" / "notes"
     nested.mkdir(parents=True)
     home = tmp_path / "home"
     home.mkdir()
     _mark_complete_install(project / ".codex", runtime="codex")
 
-    with patch("gpd.hooks.runtime_detect.Path.home", return_value=home):
-        candidates = ordered_todo_lookup_candidates(hook_file=__file__, cwd=str(nested))
+    candidates = ordered_todo_lookup_candidates(hook_file=__file__, cwd=str(nested), home=home)
 
     assert candidates[0].path == project / ".codex" / "todos"
 
@@ -217,6 +217,7 @@ def test_ordered_todo_lookup_candidates_does_not_let_nested_other_runtime_hijack
 ) -> None:
     project = tmp_path / "project"
     (project / "GPD").mkdir(parents=True)
+    (project / "GPD" / "state.json").write_text("{}", encoding="utf-8")
     nested = project / "src" / "notes"
     nested.mkdir(parents=True)
     home = tmp_path / "home"
@@ -225,9 +226,8 @@ def test_ordered_todo_lookup_candidates_does_not_let_nested_other_runtime_hijack
     _mark_complete_install(nested / ".codex", runtime="codex")
 
     with (
-        patch("gpd.hooks.runtime_detect.Path.home", return_value=home),
         patch("gpd.hooks.runtime_detect.detect_active_runtime", return_value="claude-code"),
     ):
-        candidates = ordered_todo_lookup_candidates(hook_file=__file__, cwd=str(nested))
+        candidates = ordered_todo_lookup_candidates(hook_file=__file__, cwd=str(nested), home=home)
 
     assert candidates[0].path == project / ".claude" / "todos"

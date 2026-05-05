@@ -7,11 +7,9 @@ template_version: 1
 Template for `GPD/phases/XX-name/{phase}-VERIFICATION.md` -- persistent research verification session tracking.
 
 A conversational walkthrough of research results, checking derivation logic, physical intuition, edge cases, and overall soundness.
-Use `@{GPD_INSTALL_DIR}/templates/verification-report.md` for the canonical verification frontmatter contract. This template adds the researcher-session body scaffold (`Current Check`, conversational logs, and diagnosis flow) on top of that same verification ledger.
-The verification-side `suggested_contract_checks` entries are part of the same canonical schema surface, so the body scaffold must stay aligned with the frontmatter contract rather than inventing a parallel checklist format.
-The contract-backed frontmatter example below keeps `uncertainty_markers` explicit and non-empty so the strict contract-results validator sees unresolved anchors before the report is written.
-For theorem/proof claims, keep the claim at `partial` or `blocked` until the same `contract_results.claims.<claim-id>` entry carries `proof_audit.completeness: complete` and the proof-specific acceptance test has actually passed.
-If the project has an active convention lock, include a machine-readable `ASSERT_CONVENTION` comment immediately after the YAML frontmatter using canonical lock keys and exact lock values. Changed phase verification artifacts now fail `gpd pre-commit-check` if this required header is missing or mismatched.
+Use `@{GPD_INSTALL_DIR}/templates/verification-report.md` for the canonical verification frontmatter contract. This template only adds the researcher-session body scaffold (`Current Check`, conversational logs, and diagnosis flow), so its verification-side `suggested_contract_checks` entries are part of the same canonical schema surface and must stay aligned with that shared schema instead of inventing a second checklist format.
+Keep the contract-backed frontmatter explicit: `uncertainty_markers` stay non-empty, theorem/proof claims remain `partial` or `blocked` until the proof audit is complete and every declared proof-specific acceptance test passes, and any active convention lock still requires a machine-readable `ASSERT_CONVENTION` comment after the YAML frontmatter.
+Legacy frontmatter aliases are forbidden in model-facing output; use only the canonical contract-ledger fields from `contract_results`.
 
 ---
 
@@ -21,7 +19,8 @@ If the project has an active convention lock, include a machine-readable `ASSERT
 ---
 phase: XX-name
 verified: [ISO timestamp of latest ledger update]
-status: passed | gaps_found | expert_needed | human_needed
+status: gaps_found
+# Allowed status values: passed|gaps_found|expert_needed|human_needed
 score: [N]/[M] contract targets verified
 plan_contract_ref: GPD/phases/XX-name/{phase}-{plan}-PLAN.md#/contract
 contract_results:
@@ -34,6 +33,7 @@ contract_results:
         completeness: incomplete
         reviewed_at: null
         reviewer: gpd-check-proof
+        summary: "[what the adversarial proof review concluded]"
         proof_artifact_path: derivations/main-proof.tex
         proof_artifact_sha256: null
         audit_artifact_path: GPD/phases/XX-name/{phase}-{plan}-PROOF-REDTEAM.md
@@ -112,7 +112,8 @@ source:
   - "[additional SUMMARY.md file validated]"
 started: "ISO timestamp"
 updated: "ISO timestamp"
-session_status: validating | completed | diagnosed
+session_status: validating
+# Allowed session_status values: validating|completed|diagnosed
 ---
 
 <!-- ASSERT_CONVENTION: natural_units=natural, metric_signature=mostly-minus, fourier_convention=physics -->
@@ -120,29 +121,27 @@ session_status: validating | completed | diagnosed
 ## Current Check
 
 <!-- OVERWRITE each check - shows where we are -->
-<!-- Include only the ID keys that actually bind this check.
-Omit unused `subject_id`, `claim_id`, `deliverable_id`, `acceptance_test_id`,
-and `forbidden_proxy_id` fields instead of leaving blank placeholder strings. -->
+<!-- Include only the ID keys that actually bind this check; omit unused `subject_id`, `claim_id`, `deliverable_id`, `acceptance_test_id`, and `forbidden_proxy_id` fields instead of leaving blank placeholders. -->
+<!-- Allowed body enum values: `check_subject_kind` and `suggested_subject_kind` use `claim|deliverable|acceptance_test|reference`; `comparison_kind`: benchmark|prior_work|experiment|cross_method|baseline|other. -->
 
 number: 1
 name: "[check name]"
-check_subject_kind: [claim | deliverable | acceptance_test | reference]
+check_subject_kind: claim
 subject_id: "claim-main"
 claim_id: "claim-main"
 reference_ids: ["reference-id", "..."]
-comparison_kind: [benchmark | prior_work | experiment | cross_method | baseline | other]
+comparison_kind: benchmark
 comparison_reference_id: "reference-id"
 # If this check is not comparison-backed yet, omit both `comparison_kind` and `comparison_reference_id` instead of leaving blank placeholders.
 expected: |
   [what the researcher should confirm or evaluate]
-# Use `comparison_kind: benchmark` for benchmark acceptance tests and
-# `comparison_kind: cross_method` for cross-method acceptance tests.
+# Use `comparison_kind: benchmark` for benchmark acceptance tests and `comparison_kind: cross_method` for cross-method acceptance tests.
 suggested_contract_checks:
   # If you cannot bind the gap to a known contract target yet, omit both
   # `suggested_subject_kind` and `suggested_subject_id` instead of leaving one blank.
   - check: "missing decisive check"
     reason: "why the missing check matters"
-    suggested_subject_kind: [claim | deliverable | acceptance_test | reference]
+    suggested_subject_kind: acceptance_test
     suggested_subject_id: "matching contract id"
     evidence_path: "artifact path or expected evidence path"
   # Add a reference-backed decisive gap here whenever a benchmark reference or
@@ -153,24 +152,19 @@ awaiting: researcher response
 
 ### 1. [Check Name]
 
-<!-- Include only the ID keys that actually bind this check.
-Omit unused `subject_id`, `claim_id`, `deliverable_id`, `acceptance_test_id`,
-and `forbidden_proxy_id` fields instead of leaving blank placeholder strings. -->
-
-check_subject_kind: [claim | deliverable | acceptance_test | reference]
+check_subject_kind: claim
 subject_id: "claim-main"
 claim_id: "claim-main"
 reference_ids: ["reference-id", "..."]
-comparison_kind: [benchmark | prior_work | experiment | cross_method | baseline | other]
+comparison_kind: benchmark
 comparison_reference_id: "reference-id"
-# If this check is not comparison-backed yet, omit both `comparison_kind` and `comparison_reference_id` instead of leaving blank placeholders.
 expected: "what should hold - physical reasoning, derivation step, or result property"
 suggested_contract_checks:
   # If you cannot bind the gap to a known contract target yet, omit both
   # `suggested_subject_kind` and `suggested_subject_id` instead of leaving one blank.
   - check: "missing decisive check"
     reason: "why the missing check matters"
-    suggested_subject_kind: [claim | deliverable | acceptance_test | reference]
+    suggested_subject_kind: acceptance_test
     suggested_subject_id: "matching contract id"
     evidence_path: "artifact path or expected evidence path"
 result: "pending"
@@ -210,15 +204,20 @@ forbidden_proxies_rejected: [N]
 <!-- APPEND decisive benchmark / prior-work / experiment / cross-method outcomes.
 The frontmatter `comparison_verdicts` ledger is authoritative; this section is a readable mirror. -->
 
-- subject_kind: claim | deliverable | acceptance_test | reference
+- subject_kind: claim
   subject_id: "contract-id"
-  subject_role: decisive | supporting | supplemental | other
+  subject_role: decisive
   reference_id: "reference-id"
-  comparison_kind: benchmark | prior_work | experiment | cross_method | baseline | other
-  verdict: pass | tension | fail | inconclusive
+  comparison_kind: benchmark
+  verdict: inconclusive
   metric: ""
   threshold: ""
   notes: ""
+
+Allowed `subject_kind` values: `claim|deliverable|acceptance_test|reference`.
+Allowed `subject_role` values: `decisive|supporting|supplemental|other`.
+Allowed `comparison_kind` values: `benchmark|prior_work|experiment|cross_method|baseline|other`.
+Allowed `verdict` values: `pass|tension|fail|inconclusive`.
 
 Only `subject_role: decisive` closes a required decisive comparison; the other roles are informative context only.
 
@@ -240,18 +239,18 @@ Only `subject_role: decisive` closes a required decisive comparison; the other r
 Omit unused `subject_id`, `claim_id`, `deliverable_id`, `acceptance_test_id`,
 and `forbidden_proxy_id` fields instead of leaving blank placeholder strings. -->
 
-- gap_subject_kind: "claim | deliverable | acceptance_test | reference"
+- gap_subject_kind: "claim"
   subject_id: "claim-main"
   expectation: "[expected physics property from check]"
   expected_check: "[expected physics property from check]"
   claim_id: "claim-main"
   reference_ids: ["reference-id"]
-  comparison_kind: "benchmark | prior_work | experiment | cross_method | baseline | other"
+  comparison_kind: "benchmark"
   comparison_reference_id: "reference-id"
   status: failed
   reason: "Researcher reported: [verbatim response]"
   suggested_contract_checks: []
-  severity: blocker | major | minor | cosmetic
+  severity: major
   check: 1
   root_cause: "" # Filled by diagnosis
   artifacts: [] # Filled by diagnosis
@@ -265,7 +264,7 @@ and `forbidden_proxy_id` fields instead of leaving blank placeholder strings. --
 
 **Frontmatter:**
 
-- `status`: OVERWRITE using verification-report vocabulary - `passed | gaps_found | expert_needed | human_needed`
+- `status`: use verification-report vocabulary - `passed|gaps_found|expert_needed|human_needed`
 - `phase`: IMMUTABLE - set on creation
 - `verified`: OVERWRITE - latest verification timestamp
 - `score`: OVERWRITE - contract-backed verification progress summary
@@ -273,7 +272,7 @@ and `forbidden_proxy_id` fields instead of leaving blank placeholder strings. --
 - `source`: IMMUTABLE - SUMMARY files being validated; keep this as a YAML list even when only one SUMMARY path is present
 - `started`: IMMUTABLE - set on creation
 - `updated`: OVERWRITE - update on every change
-- `session_status`: optional session-progress field for `validating | completed | diagnosed`
+- `session_status`: optional session-progress field for `validating|completed|diagnosed`
 
 **Current Check:**
 
@@ -319,7 +318,7 @@ and `forbidden_proxy_id` fields instead of leaving blank placeholder strings. --
 
 - APPEND only when issue found (YAML format)
 - Use `gap_subject_kind` for the body scaffold that feeds `gpd:plan-phase --gaps`; reserve bare `subject_kind` for canonical frontmatter ledgers such as `comparison_verdicts`
-- Keep `gap_subject_kind` to `claim | deliverable | acceptance_test | reference`; use `forbidden_proxy_id` for explicit proxy-rejection gaps and `suggested_contract_checks` for missing decisive work
+- Keep `gap_subject_kind` to `claim|deliverable|acceptance_test|reference`; use `forbidden_proxy_id` for explicit proxy-rejection gaps and `suggested_contract_checks` for missing decisive work
 - After diagnosis: fill `root_cause`, `artifacts`, `missing`, `debug_session`
 - This section feeds directly into gpd:plan-phase --gaps
 

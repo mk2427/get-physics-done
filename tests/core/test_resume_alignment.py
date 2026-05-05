@@ -61,9 +61,9 @@ def test_resume_docs_use_canonical_paths_and_no_legacy_resume_command() -> None:
     assert resume_authority_public_vocabulary_intro() in resume_doc
     assert resume_authority_public_vocabulary_intro() in help_doc
     assert resume_authority_public_vocabulary_intro() in portability_doc
-    assert "Those fields are the public top-level resume vocabulary only." in resume_doc
-    assert "Those fields are the public top-level resume vocabulary only." in help_doc
-    assert "Those fields are the public top-level resume vocabulary only." in portability_doc
+    assert "public top-level resume vocabulary" not in resume_doc
+    assert "public top-level resume vocabulary" not in help_doc
+    assert "public top-level resume vocabulary" not in portability_doc
     assert "compat_resume_surface" not in resume_doc
     assert "gpd init resume" not in resume_doc
     assert "machine_change_detected" in resume_doc
@@ -94,7 +94,7 @@ def test_resume_docs_use_canonical_paths_and_no_legacy_resume_command() -> None:
     assert "backend-only inputs" in portability_doc
     assert 'set `active_resume_kind="bounded_segment"`' in portability_doc
     assert "The canonical public resume surface centers on `active_resume_kind`, `active_resume_origin`, `active_resume_pointer`" in portability_doc
-    assert "public top-level resume vocabulary" in portability_doc
+    assert "public top-level resume vocabulary" not in portability_doc
     assert "shared resume resolver" in portability_doc
     assert "shared resume-surface resolver owns the canonical candidate kind/origin semantics" in portability_doc
     assert "Execution lineage" in portability_doc
@@ -222,7 +222,7 @@ def test_recovery_docs_keep_runtime_resume_work_distinct_from_local_resume_surfa
     assert "gpd resume --recent" in portability_doc
     assert "`gpd:pause-work`, `gpd:resume-work`" in schema_doc
     assert "`gpd resume` is the public local read-only recovery surface" in schema_doc
-    assert "`gpd init resume` remains the machine-readable backend" in schema_doc
+    assert "`gpd --raw resume` remains the machine-readable backend" in schema_doc
     assert "gpd resume" in portability_doc
 
 
@@ -252,7 +252,7 @@ def test_init_resume_ignores_session_only_machine_change_metadata_without_canoni
     monkeypatch.setattr(
         context_module,
         "_resolve_reentry_context",
-        lambda requested_cwd, data_root=None: (
+        lambda requested_cwd, data_root=None, **kwargs: (
             requested_cwd,
             {
                 "workspace_root": requested_cwd.as_posix(),

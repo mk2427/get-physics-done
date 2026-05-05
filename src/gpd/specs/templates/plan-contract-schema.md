@@ -7,7 +7,7 @@ type: plan-contract-schema
 
 Canonical source of truth for the `contract:` block embedded in PLAN frontmatter.
 
-Use this file whenever you author, revise, or validate a PLAN contract. Do not invent ad-hoc keys, collapse object lists into strings, or leave cross-referenced IDs unresolved.
+Use this file whenever you author, revise, or validate a PLAN contract. Do not invent ad-hoc keys, flatten object lists into strings, or leave cross-referenced IDs unresolved.
 
 ---
 
@@ -66,7 +66,7 @@ Rules:
 - `scope.question` is required and must be non-empty after trimming whitespace.
 - `in_scope`, `out_of_scope`, and `unresolved_questions` are optional arrays of non-empty strings.
 - Use `scope.unresolved_questions` for genuinely undecided anchors; do not hide them in prose or placeholder text.
-- Only concrete anchors count as grounding. `must_include_prior_outputs`, `user_asserted_anchors`, and `known_good_baselines` can ground the plan only when they name a durable path, citation, DOI, arXiv ID, or similarly concrete handle. `context_gaps` and `crucial_inputs` preserve uncertainty and workflow visibility, but they do not satisfy the hard grounding/anchor requirement by themselves.
+- Only concrete anchors count as grounding. `must_include_prior_outputs`, `user_asserted_anchors`, and `known_good_baselines` count only when they name a durable path, citation, DOI, arXiv ID, or similarly concrete handle. `context_gaps` and `crucial_inputs` preserve uncertainty and workflow visibility, but they do not satisfy the hard grounding requirement by themselves.
 - Placeholder-only values like `TBD`, `unknown`, `placeholder`, or other non-concrete stand-ins do not count as grounding, even if they appear in a field that is otherwise permitted to carry context.
 
 ### `claims[]`
@@ -74,7 +74,7 @@ Rules:
 ```yaml
 - id: claim-main
   statement: "[Physics statement this plan must establish]"
-  claim_kind: theorem | lemma | corollary | proposition | result | claim | other
+  claim_kind: theorem
   observables: [obs-main]
   deliverables: [deliv-main]
   acceptance_tests: [test-main]
@@ -89,7 +89,7 @@ Rules:
     - id: hyp-r0
       text: "r_0 >= 0"
       symbols: [r_0]
-      category: assumption | precondition | regime | definition | lemma | other
+      category: assumption
       required_in_proof: true
   quantifiers: ["for all x > 0", "for all r_0 >= 0"]
   conclusion_clauses:
@@ -108,10 +108,12 @@ Rules:
 - `acceptance_tests[]` may only reference declared `acceptance_tests[].id`.
 - `references[]` may only reference declared `references[].id`.
 - `claim_kind` is optional and defaults to `other`; set it explicitly for theorem-bearing claims.
-- For theorem/proof work, enumerate `parameters[]`, `hypotheses[]`, `quantifiers[]`, `conclusion_clauses[]`, and `proof_deliverables[]` so the proof audit can detect dropped assumptions, silently specialized parameters, and narrowed conclusions.
-- Nested proof lists stay list-shaped even for one item: `parameters[].aliases`, `hypotheses[].symbols`, `quantifiers`, and `proof_deliverables` must stay YAML arrays, not scalar strings.
+- `claim_kind: theorem|lemma|corollary|proposition|result|claim|other`
+- For theorem/proof work, enumerate `parameters[]`, `hypotheses[]`, `quantifiers[]`, `conclusion_clauses[]`, and `proof_deliverables[]` so proof audits can spot dropped assumptions, specialized parameters, and narrowed conclusions.
+- Keep nested proof lists as YAML arrays, even for one item: `parameters[].aliases`, `hypotheses[].symbols`, `quantifiers`, and `proof_deliverables` must not collapse to scalar strings.
 - `proof_deliverables[]` may only reference declared `deliverables[].id`.
-- When a claim is theorem-bearing or references an `observables[].kind: proof_obligation`, the contract must declare at least one proof-specific acceptance test in `acceptance_tests[]` and surface the proof fields (`proof_deliverables`, `parameters`, `hypotheses`, and `conclusion_clauses`) so the proof obligation is auditable.
+- Treat a claim as proof-bearing whenever any of these is true: `claim_kind` is `theorem|lemma|corollary|proposition|claim`; the statement is theorem-like (`prove/show that`, explicit `for all` / `exists`, or uniqueness language); any proof field is already populated (`parameters`, `hypotheses`, `quantifiers`, `conclusion_clauses`, or `proof_deliverables`); or `observables[]` references a `proof_obligation` target.
+- Proof-bearing claims must declare at least one proof-specific acceptance test in `acceptance_tests[]` and surface `proof_deliverables`, `parameters`, `hypotheses`, and `conclusion_clauses` so the proof obligation is auditable.
 - `required_in_proof` must be a literal JSON boolean (`true` or `false`), not a quoted string or synonym such as `"yes"` / `"no"`.
 
 ### `context_intake`
@@ -120,8 +122,8 @@ Rules:
 context_intake:
   must_read_refs: [ref-main]
   must_include_prior_outputs: ["GPD/phases/00-baseline/00-01-SUMMARY.md"]
-  user_asserted_anchors: ["Use the lattice normalization from the user notes"]
-  known_good_baselines: ["Published large-N curve from Smith et al."]
+  user_asserted_anchors: ["GPD/phases/00-baseline/00-01-SUMMARY.md#lattice-normalization"]
+  known_good_baselines: ["GPD/phases/00-baseline/00-01-SUMMARY.md#published-large-n-curve"]
   context_gaps: ["Comparison source still undecided before planning"]
   crucial_inputs: ["Check the user's finite-volume cutoff choice before proceeding"]
 ```
@@ -157,7 +159,7 @@ Rules:
 ```yaml
 - id: obs-main
   name: "Benchmark residual"
-  kind: scalar|curve|map|classification|proof_obligation|other
+  kind: scalar
   definition: "[What quantity or behavior is being established]"
   regime: "large-k"
   units: "dimensionless"
@@ -167,6 +169,7 @@ Rules:
 
 - Every observable must declare `id`, `name`, and `definition`.
 - `kind` is optional and defaults to `other`; set it when the plan knows a more specific semantic category.
+- `kind: scalar|curve|map|classification|proof_obligation|other`
 - When `kind: proof_obligation`, make `definition` name the theorem/result plus the hypotheses or parameter regime the proof must cover. Do not hide proof scope in body prose alone.
 - `regime` and `units` are optional strings; omit them instead of fabricating placeholders.
 - Claims may only reference observables that appear in `observables[]`.
@@ -175,7 +178,7 @@ Rules:
 
 ```yaml
 - id: deliv-main
-  kind: figure | table | dataset | data | derivation | code | note | report | other
+  kind: figure
   path: path/to/output
   description: "[Primary artifact this plan produces]"
   must_contain: ["optional checklist item"]
@@ -185,6 +188,7 @@ Rules:
 
 - Every deliverable must declare `id` and `description`.
 - `kind` is optional and defaults to `other`; set it when the deliverable type is already known.
+- `kind: figure|table|dataset|data|derivation|code|note|report|other`
 - `path` is optional, but preferred whenever the plan already knows the durable artifact location.
 - `must_contain` is optional, but if present it must be an array of strings.
 
@@ -205,10 +209,10 @@ Rules:
 
 ```yaml
 - id: ref-main
-  kind: paper | dataset | prior_artifact | spec | user_anchor | other
+  kind: paper
   locator: "[Citation, dataset identifier, or artifact path]"
   aliases: ["optional stable label or citation shorthand"]
-  role: definition | benchmark | method | must_consider | background | other
+  role: benchmark
   why_it_matters: "[What this anchor constrains]"
   applies_to: [claim-main]
   carry_forward_to: [planning, verification]
@@ -220,6 +224,8 @@ Rules:
 
 - Every reference must declare a stable `id`.
 - `kind` and `role` are optional and default to `other`; set them when the anchor semantics are already known.
+- `kind: paper | dataset | prior_artifact | spec | user_anchor | other`
+- `role: definition | benchmark | method | must_consider | background | other`
 - `aliases[]` is optional and stores stable human-facing labels or citation shorthands that downstream anchor-resolution logic may use.
 - `applies_to[]` may only reference declared claim or deliverable IDs.
 - `carry_forward_to[]` is optional free-text workflow scope (for example `planning`, `verification`, `writing`); do not overload it with contract IDs.
@@ -234,16 +240,17 @@ Rules:
 ```yaml
 - id: test-main
   subject: claim-main
-  kind: existence | schema | benchmark | consistency | cross_method | limiting_case | symmetry | dimensional_analysis | convergence | oracle | proxy | reproducibility | proof_hypothesis_coverage | proof_parameter_coverage | proof_quantifier_domain | claim_to_proof_alignment | lemma_dependency_closure | counterexample_search | human_review | other
+  kind: benchmark
   procedure: "[How this plan will check the claim]"
   pass_condition: "[Concrete decisive pass condition]"
   evidence_required: [deliv-main, ref-main]
-  automation: automated | hybrid | human
+  automation: automated
 ```
 
 Rules:
 
 - `kind` is optional and defaults to `other`; set it when the test category is already known.
+- `kind: existence | schema | benchmark | consistency | cross_method | limiting_case | symmetry | dimensional_analysis | convergence | oracle | proxy | reproducibility | proof_hypothesis_coverage | proof_parameter_coverage | proof_quantifier_domain | claim_to_proof_alignment | lemma_dependency_closure | counterexample_search | human_review | other`
 - `subject` must reference a declared claim or deliverable ID.
 - `evidence_required[]` may only reference declared claim, deliverable, acceptance-test, or reference IDs.
 - `automation` is optional and defaults to `hybrid`, but if present it must be `automated`, `hybrid`, or `human`.
@@ -255,13 +262,14 @@ Rules:
 - id: link-main
   source: claim-main
   target: deliv-main
-  relation: supports | computes | visualizes | benchmarks | depends_on | evaluated_by | proves | uses_hypothesis | depends_on_lemma | other
+  relation: supports
   verified_by: [test-main]
 ```
 
 Rules:
 
 - `relation` is optional and defaults to `other`; set it when the dependency type is already known.
+- `relation: supports | computes | visualizes | benchmarks | depends_on | evaluated_by | proves | uses_hypothesis | depends_on_lemma | other`
 - `source` and `target` may only reference declared claim, deliverable, acceptance-test, or reference IDs.
 - `verified_by[]` may only reference declared `acceptance_tests[].id`.
 
@@ -291,7 +299,7 @@ Rules:
 - A reduced contract still needs a real decision surface: preserve at least one target, open question, or carry-forward input instead of emitting a hollow scaffold.
 - If you are unsure, classify the plan as non-scoping and use the full shape.
 - `references[]` are mandatory only when the contract does not already expose enough grounding through `context_intake` or preserved scoping inputs. `context_gaps`, `crucial_inputs`, and `stop_and_rethink_conditions` keep uncertainty visible, but they do not satisfy the grounding/anchor requirement by themselves. When concrete grounding already exists, omit `references[]` rather than padding the contract with decorative anchors.
-- The schema still exposes the semantic fields `observables[].kind`, `deliverables[].kind`, `acceptance_tests[].kind`, `references[].kind`, `references[].role`, and `links[].relation`; their default is `other`. Omit them only when `other` is genuinely intended, and set the specific value explicitly when the semantics are already known.
+- The schema still exposes semantic fields `observables[].kind`, `deliverables[].kind`, `acceptance_tests[].kind`, `references[].kind`, `references[].role`, and `links[].relation`; their default is `other`. Omit them only when `other` is intended, and set the specific value explicitly when the semantics are already known.
 - For non-scoping plans, `claims[]`, `deliverables[]`, `acceptance_tests[]`, and `forbidden_proxies[]` are all required.
 - The defaultable semantic fields above do not relax the hard requirements on `context_intake` or `uncertainty_markers`, and they do not replace required contract targets for non-scoping plans.
 - For non-scoping plans, include `references[]` unless explicit grounding context survives elsewhere in the contract.

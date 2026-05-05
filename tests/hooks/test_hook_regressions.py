@@ -111,7 +111,7 @@ def test_check_update_uses_shared_update_resolution_candidates() -> None:
     ],
     ids=["global", "missing"],
 )
-def test_should_prefer_self_owned_install_rejects_mismatched_runtime_when_active_target_is_global_or_missing(
+def test_should_prefer_self_owned_install_allows_self_owned_hook_when_active_target_is_global_or_missing(
     tmp_path: Path,
     active_install_target: object,
 ) -> None:
@@ -128,7 +128,7 @@ def test_should_prefer_self_owned_install_rejects_mismatched_runtime_when_active
             active_runtime="codex",
             workspace_path=tmp_path,
         )
-        is False
+        is True
     )
 
 
@@ -161,7 +161,7 @@ def test_should_prefer_self_owned_install_still_allows_the_same_config_dir_even_
     ],
     ids=["global", "missing"],
 )
-def test_ordered_todo_lookup_candidates_rejects_mismatched_self_owned_install_when_active_target_is_global_or_missing(
+def test_ordered_todo_lookup_candidates_prefers_self_owned_install_when_active_target_is_global_or_missing(
     tmp_path: Path,
     active_install_target: object,
 ) -> None:
@@ -191,7 +191,7 @@ def test_ordered_todo_lookup_candidates_rejects_mismatched_self_owned_install_wh
     ):
         candidates = ordered_todo_lookup_candidates(hook_file=__file__, cwd=str(workspace))
 
-    assert [candidate.path for candidate in candidates] == [workspace_candidate.path]
+    assert [candidate.path for candidate in candidates] == [self_install.todo_dir, workspace_candidate.path]
 
 
 def test_statusline_current_task_uses_shared_todo_resolution_candidates(tmp_path: Path) -> None:

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+import time
+
 import pytest
 
 from gpd.core.errors import DuplicateResultError, ResultError, ResultNotFoundError
@@ -9,11 +12,13 @@ from gpd.core.results import (
     IntermediateResult,
     MissingDep,
     ResultDeps,
+    ResultDownstream,
     ResultSearchResult,
     ResultUpsertResult,
     _int_to_base36,
     result_add,
     result_deps,
+    result_downstream,
     result_list,
     result_search,
     result_update,
@@ -880,3 +885,97 @@ def test_result_verify_invalid_confidence_raises_result_error():
     result_add(state, result_id="R-01")
     with pytest.raises(ResultError, match="Invalid confidence"):
         result_verify(state, "R-01", confidence="very-high")
+
+
+# ─── result_downstream ───────────────────────────────────────────────────────
+
+
+def test_result_downstream_single_result():
+    """A result with no downstream dependents returns empty lists."""
+    state: dict = {}
+    result_add(state, result_id="R-solo")
+    ds = result_downstream(state, "R-solo")
+    assert isinstance(ds, ResultDownstream)
+    assert ds.result_id == "R-solo"
+    assert ds.direct_dependents == []
+    assert ds.transitive_dependents == []
+    assert ds.cycle_detected is False
+
+
+def test_result_downstream_linear_chain():
+    """A→B→C→D: result_downstream(A) returns B as direct, [B,C,D] as transitive."""
+    state: dict = {}
+    result_add(state, result_id="A")
+    result_add(state, result_id="B", depends_on=["A"])
+    result_add(state, result_id="C", depends_on=["B"])
+    result_add(state, result_id="D", depends_on=["C"])
+    ds = result_downstream(state, "A")
+    assert ds.direct_dependents == ["B"]
+    assert ds.transitive_dependents == ["B", "C", "D"]
+    assert ds.cycle_detected is False
+
+
+def test_result_downstream_diamond():
+    """Diamond: A→B, A→C, B→D, C→D; result_downstream(A) contains B, C, D each once."""
+    state: dict = {}
+    result_add(state, result_id="A")
+    result_add(state, result_id="B", depends_on=["A"])
+    result_add(state, result_id="C", depends_on=["A"])
+    result_add(state, result_id="D", depends_on=["B", "C"])
+    ds = result_downstream(state, "A")
+    assert set(ds.direct_dependents) == {"B", "C"}
+    assert set(ds.transitive_dependents) == {"B", "C", "D"}
+    # D appears exactly once
+    assert ds.transitive_dependents.count("D") == 1
+    assert ds.cycle_detected is False
+
+
+def test_result_downstream_cycle_terminates():
+    """B depends_on A and A depends_on B (cycle): function must return without hanging."""
+    state: dict = {
+        "intermediate_results": [
+            {"id": "A", "depends_on": ["B"], "verified": False, "verification_records": []},
+            {"id": "B", "depends_on": ["A"], "verified": False, "verification_records": []},
+        ]
+    }
+    ds = result_downstream(state, "A")
+    assert ds.cycle_detected is True
+    # B is reachable; A must not appear (it's the start node)
+    assert "B" in ds.transitive_dependents
+    assert "A" not in ds.transitive_dependents
+
+
+def test_result_downstream_cycle_emits_debug_warning(caplog):
+    """Cycle traversal must emit a DEBUG log line containing 'Cycle detected' or 'cycle'."""
+    state: dict = {
+        "intermediate_results": [
+            {"id": "A", "depends_on": ["B"], "verified": False, "verification_records": []},
+            {"id": "B", "depends_on": ["A"], "verified": False, "verification_records": []},
+        ]
+    }
+    with caplog.at_level(logging.DEBUG, logger="gpd.core.results"):
+        result_downstream(state, "A")
+    cycle_messages = [
+        r.message for r in caplog.records if "cycle" in r.message.lower() or "Cycle" in r.message
+    ]
+    assert cycle_messages, "Expected at least one DEBUG log record mentioning a cycle"
+
+
+def test_result_downstream_o_n_performance():
+    """1000-result linear chain: result_downstream(first) completes in < 1 second."""
+    n = 1000
+    state: dict = {"intermediate_results": []}
+    ids = [f"R-{i:04d}" for i in range(n)]
+    for i, rid in enumerate(ids):
+        deps = [ids[i - 1]] if i > 0 else []
+        state["intermediate_results"].append({
+            "id": rid,
+            "depends_on": deps,
+            "verified": False,
+            "verification_records": [],
+        })
+    start = time.monotonic()
+    ds = result_downstream(state, ids[0])
+    elapsed = time.monotonic() - start
+    assert elapsed < 1.0, f"result_downstream took {elapsed:.3f}s on {n}-result chain (limit: 1s)"
+    assert len(ds.transitive_dependents) == n - 1

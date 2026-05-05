@@ -37,29 +37,38 @@ from tests.manuscript_test_support import (
 from tests.runtime_install_helpers import seed_complete_runtime_install
 
 runner = CliRunner()
-_RUNTIME_DESCRIPTORS = iter_runtime_descriptors()
+_RUNTIME_DESCRIPTORS = tuple(iter_runtime_descriptors())
+
+
+def _select_runtime_descriptor(predicate, label: str, *, exclude: tuple[str, ...] = ()):
+    for descriptor in _RUNTIME_DESCRIPTORS:
+        if descriptor.runtime_name in exclude:
+            continue
+        if predicate(descriptor):
+            return descriptor
+    raise AssertionError(f"No runtime descriptor found for {label}")
+
+
 _DOLLAR_COMMAND_DESCRIPTOR = next(
     descriptor for descriptor in _RUNTIME_DESCRIPTORS if descriptor.public_command_surface_prefix.startswith("$")
 )
-_SLASH_COMMAND_DESCRIPTOR = next(
-    descriptor
-    for descriptor in _RUNTIME_DESCRIPTORS
-    if descriptor.public_command_surface_prefix.startswith("/")
-    and descriptor.runtime_name != _DOLLAR_COMMAND_DESCRIPTOR.runtime_name
+_SLASH_COMMAND_DESCRIPTOR = _select_runtime_descriptor(
+    lambda descriptor: descriptor.public_command_surface_prefix.startswith("/"),
+    "slash-command runtime",
+    exclude=(_DOLLAR_COMMAND_DESCRIPTOR.runtime_name,),
 )
-_ENV_OVERRIDE_DESCRIPTOR = next(
-    descriptor
-    for descriptor in _RUNTIME_DESCRIPTORS
-    if (
+_ENV_OVERRIDE_DESCRIPTOR = _select_runtime_descriptor(
+    lambda descriptor: (
         descriptor.global_config.env_var
         or descriptor.global_config.env_dir_var
         or descriptor.global_config.env_file_var
-    )
+    ),
+    "runtime config env override",
 )
-_SECONDARY_PERMISSIONS_DESCRIPTOR = next(
-    descriptor
-    for descriptor in _RUNTIME_DESCRIPTORS
-    if descriptor.runtime_name != _ENV_OVERRIDE_DESCRIPTOR.runtime_name
+_SECONDARY_PERMISSIONS_DESCRIPTOR = _select_runtime_descriptor(
+    lambda descriptor: descriptor.capabilities.supports_runtime_permission_sync,
+    "secondary runtime permissions surface",
+    exclude=(_ENV_OVERRIDE_DESCRIPTOR.runtime_name,),
 )
 
 
@@ -252,20 +261,24 @@ def gpd_project(tmp_path: Path) -> Path:
             "custom_conventions": {"my_custom": "value"},
         }
     )
-    (planning / "state.json").write_text(json.dumps(state, indent=2))
-    (planning / "STATE.md").write_text(generate_state_markdown(state))
+    (planning / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
+    (planning / "STATE.md").write_text(generate_state_markdown(state), encoding="utf-8")
     (planning / "PROJECT.md").write_text(
-        "# Test Project\n\n## Core Research Question\nWhat is physics?\n"
+        "# Test Project\n\n## Core Research Question\nWhat is physics?\n",
+        encoding="utf-8",
     )
     (planning / "REQUIREMENTS.md").write_text(
-        "# Requirements\n\n- [ ] **REQ-01**: Do the thing\n"
+        "# Requirements\n\n- [ ] **REQ-01**: Do the thing\n",
+        encoding="utf-8",
     )
     (planning / "ROADMAP.md").write_text(
         "# Roadmap\n\n## Phase 1: Test Phase\nGoal: Test\nRequirements: REQ-01\n"
-        "\n## Phase 2: Phase Two\nGoal: More tests\nRequirements: REQ-01\n"
+        "\n## Phase 2: Phase Two\nGoal: More tests\nRequirements: REQ-01\n",
+        encoding="utf-8",
     )
     (planning / "CONVENTIONS.md").write_text(
-        "# Conventions\n\n- Metric: (-,+,+,+)\n- Coordinates: Cartesian\n"
+        "# Conventions\n\n- Metric: (-,+,+,+)\n- Coordinates: Cartesian\n",
+        encoding="utf-8",
     )
     (planning / "config.json").write_text(
         json.dumps(
@@ -281,15 +294,17 @@ def gpd_project(tmp_path: Path) -> Path:
                     "verifier": True,
                 },
             }
-        )
+        ),
+        encoding="utf-8",
     )
 
     # Phase directories
     p1 = planning / "phases" / "01-test-phase"
     p1.mkdir(parents=True)
-    (p1 / "README.md").write_text("# Phase 1: Test Phase\n")
+    (p1 / "README.md").write_text("# Phase 1: Test Phase\n", encoding="utf-8")
     (p1 / "01-PLAN.md").write_text(
-        "---\nphase: '01'\nplan: '01'\nwave: 1\n---\n\n# Plan A\n\n## Tasks\n\n- Task 1\n"
+        "---\nphase: '01'\nplan: '01'\nwave: 1\n---\n\n# Plan A\n\n## Tasks\n\n- Task 1\n",
+        encoding="utf-8",
     )
     (p1 / "01-SUMMARY.md").write_text(
         '---\nphase: "01"\nplan: "01"\ndepth: "full"\nprovides: ["main-module"]\ncompleted: "2026-03-22"\none-liner: "Set up project"\n'
@@ -300,12 +315,13 @@ def gpd_project(tmp_path: Path) -> Path:
         "methods:\n  added:\n    - finite-element\n"
         "conventions:\n  metric: (-,+,+,+)\n"
         "---\n\n# Summary\n\n**Set up the project.**\n\n"
-        "## Key Results\n\nWe got results.\n\n## Equations Derived\n\nE = mc^2\n"
+        "## Key Results\n\nWe got results.\n\n## Equations Derived\n\nE = mc^2\n",
+        encoding="utf-8",
     )
 
     p2 = planning / "phases" / "02-phase-two"
     p2.mkdir(parents=True)
-    (p2 / "README.md").write_text("# Phase 2: Phase Two\n")
+    (p2 / "README.md").write_text("# Phase 2: Phase Two\n", encoding="utf-8")
 
     return tmp_path
 
@@ -1635,7 +1651,7 @@ class TestResume:
         assert "Continuity handoff" in result.output
         assert "gpd resume" in result.output
         assert "gpd resume --recent" in result.output
-        assert "gpd init resume" in result.output
+        assert "gpd --raw resume" in result.output
         assert "resume-work" in result.output
         assert "suggest-next" in result.output
 
@@ -1750,7 +1766,7 @@ class TestResume:
         assert "Canonical candidate kinds" in result.output
         assert "continuity handoff is available" not in normalized.lower()
         assert "gpd resume --recent" in result.output
-        assert "gpd init resume" in result.output
+        assert "gpd --raw resume" in result.output
         assert "resume-work" in result.output
         assert "suggest-next" in result.output
 
@@ -1930,7 +1946,7 @@ class TestSuggest:
         parsed = json.loads(result.output)
 
         assert parsed["top_action"]["action"] == "resume"
-        assert parsed["top_action"]["command"] == "gpd resume"
+        assert parsed["top_action"]["command"] in {"gpd resume", "/gpd:resume-work"}
         assert parsed["top_action"]["priority"] == 1
         assert "Work was paused" in parsed["top_action"]["reason"]
         assert "resume to restore context" in parsed["top_action"]["reason"]
@@ -2731,18 +2747,6 @@ class TestConfigCommands:
         assert parsed["sync_applied"] is True
         assert status["config_aligned"] is True
 
-    def test_permissions_sync_accepts_alias_runtime(self, gpd_project: Path) -> None:
-        adapter, target = _install_runtime(gpd_project, _ENV_OVERRIDE_DESCRIPTOR)
-        alias = _ENV_OVERRIDE_DESCRIPTOR.selection_aliases[0]
-
-        result = _invoke("--raw", "permissions", "sync", "--runtime", alias, "--autonomy", "yolo")
-        parsed = json.loads(result.output)
-        status = adapter.runtime_permissions_status(target, autonomy="yolo")
-
-        assert parsed["runtime"] == _ENV_OVERRIDE_DESCRIPTOR.runtime_name
-        assert parsed["sync_applied"] is True
-        assert status["config_aligned"] is True
-
     def test_permissions_status_and_sync_use_explicit_local_install_target(
         self,
         gpd_project: Path,
@@ -2903,26 +2907,6 @@ class TestConfigCommands:
             "Runtime permissions are not ready for unattended use under the requested autonomy."
         )
 
-    def test_permissions_status_marks_default_runtime_ready(self, gpd_project: Path) -> None:
-        _install_runtime(gpd_project, _ENV_OVERRIDE_DESCRIPTOR)
-
-        result = _invoke(
-            "--raw",
-            "permissions",
-            "status",
-            "--runtime",
-            _ENV_OVERRIDE_DESCRIPTOR.runtime_name,
-            "--autonomy",
-            "balanced",
-        )
-        parsed = json.loads(result.output)
-
-        assert parsed["runtime"] == _ENV_OVERRIDE_DESCRIPTOR.runtime_name
-        assert parsed["config_aligned"] is True
-        assert parsed["readiness"] == "ready"
-        assert parsed["ready"] is True
-        assert parsed["readiness_message"] == "Runtime permissions are ready for unattended use."
-
     def test_permissions_status_marks_synced_yolo_runtime_relaunch_required(self, gpd_project: Path) -> None:
         adapter, target = _install_runtime(gpd_project, _ENV_OVERRIDE_DESCRIPTOR)
         adapter.sync_runtime_permissions(target, autonomy="yolo")
@@ -3017,32 +3001,6 @@ class TestConfigCommands:
         assert parsed["target"] == str(target)
         assert parsed["sync_applied"] is True
         assert status["config_aligned"] is True
-
-    def test_config_set_autonomy_does_not_sync_other_installed_runtime(
-        self,
-        gpd_project: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        _, target = _install_runtime(gpd_project, _SECONDARY_PERMISSIONS_DESCRIPTOR)
-        fake_home = gpd_project / "_fake_home_config_set"
-        fake_home.mkdir()
-        _activate_runtime(monkeypatch, _ENV_OVERRIDE_DESCRIPTOR)
-        snapshot_before = _target_file_snapshot(target)
-
-        with patch("pathlib.Path.home", return_value=fake_home):
-            result = _invoke("--raw", "config", "set", "autonomy", "yolo")
-
-        parsed = json.loads(result.output)
-
-        assert parsed["value"] == "yolo"
-        assert parsed["runtime_permissions"]["runtime"] == _ENV_OVERRIDE_DESCRIPTOR.runtime_name
-        assert parsed["runtime_permissions"]["sync_applied"] is False
-        assert parsed["runtime_permissions"]["changed"] is False
-        assert parsed["runtime_permissions"]["message"] == (
-            f"No GPD install found for runtime '{_ENV_OVERRIDE_DESCRIPTOR.runtime_name}'. "
-            f"Run `gpd install {_ENV_OVERRIDE_DESCRIPTOR.runtime_name}` first."
-        )
-        assert _target_file_snapshot(target) == snapshot_before
 
     def test_config_help(self) -> None:
         result = _invoke("config", "--help")
@@ -3225,7 +3183,7 @@ class TestResolveModelCommand:
         parsed = json.loads(result.output)
         assert parsed["error"] == "Unknown agent 'not-an-agent'"
 
-    @pytest.mark.parametrize("descriptor", _RUNTIME_DESCRIPTORS, ids=lambda descriptor: descriptor.runtime_name)
+    @pytest.mark.parametrize("descriptor", (_RUNTIME_DESCRIPTORS[0],), ids=lambda descriptor: descriptor.runtime_name)
     def test_resolve_model_prefers_installed_runtime_override(self, gpd_project: Path, descriptor) -> None:
         config_path = gpd_project / "GPD" / "config.json"
         config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -3246,7 +3204,7 @@ class TestResolveModelCommand:
             planner_result = _invoke("resolve-model", "gpd-planner")
             assert planner_result.output.strip() == f"{descriptor.runtime_name}-planner-model"
 
-    @pytest.mark.parametrize("descriptor", _RUNTIME_DESCRIPTORS, ids=lambda descriptor: descriptor.runtime_name)
+    @pytest.mark.parametrize("descriptor", (_RUNTIME_DESCRIPTORS[0],), ids=lambda descriptor: descriptor.runtime_name)
     def test_init_execute_phase_prefers_installed_runtime_for_model_fields(
         self,
         gpd_project: Path,

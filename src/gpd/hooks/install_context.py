@@ -13,7 +13,7 @@ from gpd.hooks.install_metadata import (
     install_scope_from_manifest,
     installed_runtime,
 )
-from gpd.hooks.runtime_lookup import resolve_runtime_lookup_dir
+from gpd.hooks.runtime_lookup import normalize_runtime_hint, resolve_runtime_lookup_dir
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,16 +94,16 @@ def should_prefer_self_owned_install(
         return False
     if active_install_target is not None and self_install.config_dir == active_install_target.config_dir:
         return True
+    if active_install_target is None:
+        return True
+    if workspace_path is None or getattr(active_install_target, "install_scope", None) != "local":
+        return True
     if (
         self_install.runtime is not None
         and active_runtime is not None
         and self_install.runtime != active_runtime
     ):
         return False
-    if active_install_target is None:
-        return True
-    if workspace_path is None or getattr(active_install_target, "install_scope", None) != "local":
-        return True
     return False
 
 
@@ -116,23 +116,11 @@ def resolve_hook_lookup_context(
 ) -> HookLookupContext:
     """Resolve the shared cwd/home/runtime preference context for hook lookups."""
     from gpd.hooks.runtime_detect import (
-        RUNTIME_UNKNOWN,
         detect_active_runtime,
         detect_active_runtime_with_gpd_install,
         detect_local_runtime_with_gpd_install,
         detect_runtime_for_gpd_use,
-        normalize_runtime_name,
-        supported_runtime_names,
     )
-    runtime_names = supported_runtime_names()
-
-    def _normalize_runtime_hint(runtime: str | None) -> str | None:
-        if runtime is None:
-            return None
-        normalized = normalize_runtime_name(runtime)
-        if normalized in (None, RUNTIME_UNKNOWN):
-            return None
-        return normalized if normalized in runtime_names else None
 
     resolved_cwd = Path(cwd).expanduser().resolve(strict=False) if cwd is not None else None
     resolved_home = Path.home() if home is None else Path(home).expanduser().resolve(strict=False)
@@ -141,8 +129,8 @@ def resolve_hook_lookup_context(
         if active_installed_runtime is not None
         else detect_active_runtime(cwd=resolved_cwd, home=resolved_home)
     )
-    active_runtime_hint = _normalize_runtime_hint(raw_active_runtime_hint)
-    normalized_preferred_runtime = _normalize_runtime_hint(preferred_runtime)
+    active_runtime_hint = normalize_runtime_hint(raw_active_runtime_hint)
+    normalized_preferred_runtime = normalize_runtime_hint(preferred_runtime)
     runtime_hint = active_runtime_hint or normalized_preferred_runtime
     lookup_cwd = _prefer_runtime_lookup_cwd(
         resolved_cwd=resolved_cwd,
@@ -153,14 +141,16 @@ def resolve_hook_lookup_context(
         if active_installed_runtime is not None
         else detect_active_runtime_with_gpd_install(cwd=lookup_cwd, home=resolved_home)
     )
-    active_runtime = _normalize_runtime_hint(raw_active_runtime)
+    active_runtime = normalize_runtime_hint(raw_active_runtime)
     prioritized_runtime = (
         normalized_preferred_runtime
-        if preferred_runtime is not None
-        else _normalize_runtime_hint(detect_runtime_for_gpd_use(cwd=lookup_cwd, home=resolved_home))
+        if normalized_preferred_runtime is not None
+        else normalize_runtime_hint(detect_runtime_for_gpd_use(cwd=lookup_cwd, home=resolved_home))
     )
     if active_runtime is None:
-        local_runtime = _normalize_runtime_hint(detect_local_runtime_with_gpd_install(cwd=lookup_cwd, home=resolved_home))
+        local_runtime = normalize_runtime_hint(
+            detect_local_runtime_with_gpd_install(cwd=lookup_cwd, home=resolved_home)
+        )
         if local_runtime is not None:
             active_runtime = local_runtime
     return HookLookupContext(

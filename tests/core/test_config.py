@@ -11,14 +11,20 @@ from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from gpd.core.config import (
     AGENT_DEFAULT_TIERS,
     MODEL_PROFILES,
+    AssertionGateMode,
     AutonomyMode,
     BranchingStrategy,
     GPDProjectConfig,
+    KnowledgeGateMode,
     ModelProfile,
     ModelTier,
     ResearchMode,
     ReviewCadence,
+    _model_from_parsed_config,
     _valid_runtime_names,
+    apply_config_update,
+    canonical_config_key,
+    effective_config_value,
     load_config,
     resolve_agent_tier,
     resolve_model,
@@ -70,8 +76,8 @@ class TestEnums:
 
 
 class TestModelProfiles:
-    def test_all_24_agents_present(self):
-        assert len(MODEL_PROFILES) == 24
+    def test_all_33_agents_present(self):
+        assert len(MODEL_PROFILES) == 33
 
     def test_all_agents_have_5_profiles(self):
         profiles = {"deep-theory", "numerical", "exploratory", "review", "paper-writing"}
@@ -289,6 +295,47 @@ class TestLoadConfig:
             load_config(tmp_path)
 
         _valid_runtime_names.cache_clear()
+
+    def test_model_overrides_accept_runtime_display_name_and_normalize_to_canonical_id(self, tmp_path: Path) -> None:
+        descriptor = next(
+            descriptor
+            for descriptor in _RUNTIME_DESCRIPTORS
+            if descriptor.display_name != descriptor.runtime_name
+        )
+        (tmp_path / "GPD").mkdir()
+        (tmp_path / "GPD" / "config.json").write_text(
+            json.dumps({"model_overrides": {descriptor.display_name: {"tier-1": "gpt-5.4"}}}),
+            encoding="utf-8",
+        )
+
+        cfg = load_config(tmp_path)
+
+        assert cfg.model_overrides == {descriptor.runtime_name: {"tier-1": "gpt-5.4"}}
+
+    def test_model_overrides_reject_duplicate_canonical_and_display_runtime_entries(self, tmp_path: Path) -> None:
+        descriptor = next(
+            descriptor
+            for descriptor in _RUNTIME_DESCRIPTORS
+            if descriptor.display_name != descriptor.runtime_name
+        )
+        (tmp_path / "GPD").mkdir()
+        (tmp_path / "GPD" / "config.json").write_text(
+            json.dumps(
+                {
+                    "model_overrides": {
+                        descriptor.runtime_name: {"tier-1": "canonical-model"},
+                        descriptor.display_name: {"tier-2": "display-model"},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        expected_match = re.escape(
+            f"model_overrides contains duplicate runtime entries for '{descriptor.runtime_name}'"
+        )
+        with pytest.raises(ConfigError, match=expected_match):
+            load_config(tmp_path)
 # ─── resolve_agent_tier ─────────────────────────────────────────────────────────
 
 
@@ -421,3 +468,76 @@ class TestResolveTier:
         )
         tier = resolve_tier(tmp_path, "gpd-project-researcher")
         assert tier == ModelTier.TIER_3
+
+
+# ─── Knowledge + assertion gate knobs ──────────────────────────────────────────
+
+
+class TestGates:
+    """knowledge_gate + assertion_gate: independent knobs, default off, enum-validated."""
+
+    def test_defaults_are_off(self) -> None:
+        cfg = GPDProjectConfig()
+        assert cfg.knowledge_gate is KnowledgeGateMode.OFF
+        assert cfg.assertion_gate is AssertionGateMode.OFF
+
+    def test_enum_values_are_canonical(self) -> None:
+        assert KnowledgeGateMode.OFF.value == "off"
+        assert KnowledgeGateMode.WARN.value == "warn"
+        assert KnowledgeGateMode.BLOCK.value == "block"
+        assert AssertionGateMode.OFF.value == "off"
+        assert AssertionGateMode.WARN.value == "warn"
+        assert AssertionGateMode.BLOCK.value == "block"
+
+    def test_invalid_enum_value_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            GPDProjectConfig(knowledge_gate="nope")  # type: ignore[arg-type]
+        with pytest.raises(ValueError):
+            GPDProjectConfig(assertion_gate="nope")  # type: ignore[arg-type]
+
+    def test_canonical_key_resolution_flat(self) -> None:
+        assert canonical_config_key("knowledge_gate") == "knowledge_gate"
+        assert canonical_config_key("assertion_gate") == "assertion_gate"
+
+    def test_canonical_key_resolution_workflow_section(self) -> None:
+        assert canonical_config_key("workflow.knowledge_gate") == "knowledge_gate"
+        assert canonical_config_key("workflow.assertion_gate") == "assertion_gate"
+
+    def test_independent_settability_block_plus_off(self) -> None:
+        raw: dict[str, object] = {}
+        raw, _ = apply_config_update(raw, "knowledge_gate", "block")
+        cfg = _model_from_parsed_config(raw)
+        assert cfg.knowledge_gate is KnowledgeGateMode.BLOCK
+        # assertion_gate untouched; still OFF.
+        assert cfg.assertion_gate is AssertionGateMode.OFF
+
+    def test_independent_settability_off_plus_warn(self) -> None:
+        raw: dict[str, object] = {}
+        raw, _ = apply_config_update(raw, "assertion_gate", "warn")
+        cfg = _model_from_parsed_config(raw)
+        assert cfg.assertion_gate is AssertionGateMode.WARN
+        assert cfg.knowledge_gate is KnowledgeGateMode.OFF
+
+    def test_independent_settability_combination(self) -> None:
+        raw: dict[str, object] = {}
+        raw, _ = apply_config_update(raw, "knowledge_gate", "block")
+        raw, _ = apply_config_update(raw, "assertion_gate", "warn")
+        cfg = _model_from_parsed_config(raw)
+        assert cfg.knowledge_gate is KnowledgeGateMode.BLOCK
+        assert cfg.assertion_gate is AssertionGateMode.WARN
+
+    def test_effective_workflow_section_includes_both_gates(self) -> None:
+        cfg = GPDProjectConfig()
+        found, section = effective_config_value(cfg, "workflow")
+        assert found
+        assert isinstance(section, dict)
+        assert section["knowledge_gate"] == "off"
+        assert section["assertion_gate"] == "off"
+
+    def test_invalid_value_raises_on_apply(self) -> None:
+        from gpd.core.errors import ConfigError
+
+        with pytest.raises(ConfigError):
+            apply_config_update({}, "knowledge_gate", "nope")
+        with pytest.raises(ConfigError):
+            apply_config_update({}, "assertion_gate", "nope")

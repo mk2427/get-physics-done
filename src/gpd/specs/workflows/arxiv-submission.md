@@ -12,14 +12,14 @@ Read all files referenced by the invoking prompt's execution_context before star
 **Locate paper directory and load project context:**
 
 ```bash
-INIT=$(gpd init phase-op)
+INIT=$(gpd --raw init phase-op)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
   # STOP — display the error to the user and do not proceed.
 fi
 ```
 
-Parse JSON for: `commit_docs`, `state_exists`, `project_exists`, `derived_manuscript_reference_status`, `derived_manuscript_reference_status_count`.
+Parse JSON for: `commit_docs`, `state_exists`, `project_exists`, `derived_manuscript_reference_status`, `derived_manuscript_reference_status_count`, `derived_manuscript_proof_review_status`.
 
 Run centralized context preflight before continuing:
 
@@ -46,6 +46,7 @@ fi
 ```
 
 If review preflight exits nonzero because of missing project state, missing manuscript, missing compiled manuscript, unresolved publication blockers, degraded review integrity, missing conventions, missing staged review artifacts, or stale theorem-proof review state, STOP and fix those blockers before packaging. If `derived_manuscript_reference_status` is present, use it as a first-pass summary of reference coverage and citation freshness, but keep the resolved manuscript root's `ARTIFACT-MANIFEST.json` and `BIBLIOGRAPHY-AUDIT.json` authoritative for strict packaging decisions.
+If `derived_manuscript_proof_review_status` is present, use it as the first-pass summary of theorem-proof freshness for the resolved manuscript, but keep the manuscript-root proof-redteam and publication artifacts authoritative for strict packaging decisions.
 Strict preflight also requires `ARTIFACT-MANIFEST.json` and `BIBLIOGRAPHY-AUDIT.json` beside the resolved manuscript entry point. Treat those files as manuscript-root artifact gates. If `$ARGUMENTS` resolves to an explicit manuscript under `paper/`, `manuscript/`, or `draft/`, those review artifacts must come from that same resolved manuscript root, not from legacy `GPD/paper/` copies or some other manuscript directory.
 Treat `gpd paper-build` as the authoritative step that regenerates `BIBLIOGRAPHY-AUDIT.json` for the resolved manuscript root. Do not package stale audit artifacts, even if the bibliography only changed indirectly through a citation-source handoff.
 Strict preflight also requires the latest round-specific `GPD/review/REVIEW-LEDGER*.json` / `GPD/review/REFEREE-DECISION*.json` pair as authoritative submission-gate input. Missing either artifact is a hard stop. That pair must validate against the active manuscript, and packaging may continue only when the latest recommendation is `accept` or `minor_revision` with no unresolved blocking issues. A latest `major_revision` or `reject` decision is a hard stop for submission packaging. For theorem-bearing manuscripts, `manuscript_proof_review` must also already be cleared; arXiv packaging is not allowed to repair or waive a stale proof review.

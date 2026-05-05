@@ -33,6 +33,7 @@
       "gpd observe execution",
       "gpd cost",
       "gpd presets list",
+      "gpd validate plan-preflight <PLAN.md>",
       "gpd integrations status wolfram"
     ],
     "named_commands": {
@@ -46,10 +47,15 @@
       "observe_execution": "gpd observe execution",
       "cost": "gpd cost",
       "presets_list": "gpd presets list",
+      "plan_preflight": "gpd validate plan-preflight <PLAN.md>",
       "integrations_status_wolfram": "gpd integrations status wolfram"
     },
     "terminal_phrase": "from your normal terminal",
-    "purpose_phrase": "the broader local diagnostics, readiness, recovery, visibility, cost, preset, and shared Wolfram integration surface"
+    "purpose_phrase": "the broader local install, readiness, validation, permissions, observability, diagnostics, recovery, cost, preset, and shared Wolfram integration surface",
+    "install_local_example": "gpd install <runtime> --local",
+    "doctor_local_command": "gpd doctor --runtime <runtime> --local",
+    "doctor_global_command": "gpd doctor --runtime <runtime> --global",
+    "validate_command_context_command": "gpd validate command-context gpd:<name>"
   },
   "post_start_settings": {
     "primary_sentence": "After your first successful start or later, use the runtime `settings` command to review autonomy, workflow defaults, model-cost posture, runtime permission sync, and preset/tier overrides.",
@@ -57,7 +63,7 @@
   },
   "resume_authority": {
     "durable_authority_phrase": "`state.json.continuation` is the durable authority",
-    "public_vocabulary_intro": "Public resume vocabulary centers on canonical continuation fields",
+    "public_vocabulary_intro": "Canonical continuation fields define the public resume vocabulary",
     "public_fields": [
       "active_resume_kind",
       "active_resume_origin",
@@ -70,7 +76,7 @@
       "missing_continuity_handoff_file",
       "resume_candidates"
     ],
-    "top_level_boundary_phrase": "public top-level resume vocabulary only"
+    "top_level_boundary_phrase": "Canonical continuation fields define the public resume vocabulary"
   },
   "recovery_ladder": {
     "title": "Recovery ladder",

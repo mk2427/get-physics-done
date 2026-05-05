@@ -29,7 +29,13 @@ def test_new_project_prompt_surfaces_the_canonical_state_schema_for_project_cont
     )
 
     assert "templates/state-json-schema.md" in new_project_text
-    assert "Before you ask for approval, build the raw contract as a literal JSON object for the `project_contract` subsection of `templates/state-json-schema.md`:" in new_project_text
+    assert (
+        "Before you ask for approval, keep the contract as a literal JSON object for the "
+        "`project_contract` subsection of `templates/state-json-schema.md`, and use that "
+        "schema as the canonical source of truth for the object rules. Do not restate the "
+        "contract rules here."
+        in new_project_text
+    )
     assert "Do not approve a scoping contract that strips decisive outputs, anchors, prior outputs, or review/stop triggers down to generic placeholders." in new_project_text
     assert "the contract schema is closed: do not add invented top-level or nested keys" in new_project_text
     assert "list fields must stay lists even for single-item values" in new_project_text
@@ -41,7 +47,11 @@ def test_new_project_prompt_surfaces_the_canonical_state_schema_for_project_cont
     assert "`schema_version` must be the integer `1`" in new_project_text
     assert "`references[].must_surface` must be a boolean `true` or `false`" in new_project_text
     assert "`claims[].proof_deliverables` must point only to declared `deliverables[].id` values" in new_project_text
-    assert "proof-bearing claims (theorem-like claim kinds, or claims linked to `proof_obligation` observables)" in new_project_text
+    assert "treat a claim as proof-bearing whenever any of these is true" in new_project_text
+    assert "`claim_kind` is `theorem`, `lemma`, `corollary`, `proposition`, or `claim`" in new_project_text
+    assert "the statement is theorem-like (`prove/show that`, explicit `for all` / `exists`, or uniqueness language)" in new_project_text
+    assert "any proof field is already populated (`parameters`, `hypotheses`, `quantifiers`, `conclusion_clauses`, or `proof_deliverables`)" in new_project_text
+    assert "`observables[]` references a `proof_obligation` target" in new_project_text
     assert "proof-bearing claims must include at least one proof-specific acceptance test kind" in new_project_text
     assert "project_contract_load_info" in new_project_text
     assert "project_contract_validation" in new_project_text
@@ -72,18 +82,22 @@ def test_new_project_prompt_surfaces_the_canonical_state_schema_for_project_cont
     assert "If the init JSON already contains `project_contract`, `project_contract_load_info`, or `project_contract_validation`, preserve that state in the approval gate and continuation decision." in new_project_text
 
 
-def test_new_project_duplicate_contract_rule_blocks_stay_in_sync() -> None:
+def test_new_project_contract_rule_block_is_not_duplicated() -> None:
     new_project_text = NEW_PROJECT.read_text(encoding="utf-8")
     show_block = _extract_contract_rule_block_lines(
         new_project_text,
         "Before you show the approval gate, build the raw contract as a literal JSON object for the `project_contract` subsection of `templates/state-json-schema.md`:",
     )
-    ask_block = _extract_contract_rule_block_lines(
-        new_project_text,
-        "Before you ask for approval, build the raw contract as a literal JSON object for the `project_contract` subsection of `templates/state-json-schema.md`:",
-    )
+    later_block = new_project_text.split(
+        "Before you ask for approval, keep the contract as a literal JSON object for the `project_contract` subsection of `templates/state-json-schema.md`, and use that schema as the canonical source of truth for the object rules. Do not restate the contract rules here.",
+        1,
+    )[1].split("Present a concise scoping summary", 1)[0]
 
-    assert show_block == ask_block
+    assert len(show_block) > 10
+    assert new_project_text.count("Before you show the approval gate, build the raw contract as a literal JSON object") == 1
+    assert new_project_text.count("Before you ask for approval, keep the contract as a literal JSON object") == 1
+    assert "- `project_contract` is a JSON object, not prose" not in later_block
+    assert "- `observables`, `claims`, `deliverables`, `acceptance_tests`, `references`, `forbidden_proxies`, and `links` are arrays of objects, not strings" not in later_block
 
 
 def test_state_schema_surfaces_the_exact_approved_mode_grounding_rule() -> None:
@@ -98,24 +112,30 @@ def test_state_schema_surfaces_the_exact_approved_mode_grounding_rule() -> None:
         "`must_include_prior_outputs[]` entries should be explicit project-artifact paths or filenames that already exist inside the current project root."
         in state_schema_text
     )
+    assert "If `project_root` is unavailable, treat them as non-grounding until the file can be resolved against a concrete root." in state_schema_text
     assert '"must_include_prior_outputs": ["GPD/phases/00-baseline/00-01-SUMMARY.md"]' in state_schema_text
     assert "`GPD/phases/.../*-SUMMARY.md` or `paper/main.tex`" not in state_schema_text
     assert "`GPD/phases/.../SUMMARY.md`" not in state_schema_text
     assert (
-        "`user_asserted_anchors[]` and `known_good_baselines[]` should use at least three words and name a concrete benchmark, baseline, reference, paper, notebook, figure, table, dataset, curve, result, derivation, observable, limit, comparison, or comparable anchor phrase."
+        "`user_asserted_anchors[]` and `known_good_baselines[]` must name a concrete, re-findable handle such as a citation, DOI, arXiv ID, durable URL, or project-local artifact path."
         in state_schema_text
     )
+    assert "Multi-word prose alone does not count." in state_schema_text
+    assert "should use at least three words and name a concrete benchmark" not in state_schema_text
     assert "gpd --raw validate project-contract - --mode approved" in state_schema_text
     assert "`context_intake`, `approach_policy`, and `uncertainty_markers` are JSON objects when present; do not collapse them to strings or lists." in state_schema_text
     assert "`schema_version` must be the integer `1`." in state_schema_text
     assert "`must_surface` is a boolean scalar. Use the JSON literals `true` and `false`;" in state_schema_text
     assert "`context_intake` must not be empty." in state_schema_text
     assert '`claims[]` — `{ "id", "statement", "claim_kind", "observables[]", "deliverables[]", "acceptance_tests[]", "references[]", "parameters[]", "hypotheses[]", "quantifiers[]", "conclusion_clauses[]", "proof_deliverables[]" }`' in state_schema_text
-    assert "Proof-bearing claim fields are required when the claim is theorem-like" in state_schema_text
+    assert "Treat a claim as proof-bearing whenever any of these is true" in state_schema_text
+    assert "`claim_kind` is `theorem`, `lemma`, `corollary`, `proposition`, or `claim`" in state_schema_text
+    assert "the statement is theorem-like (`prove/show that`, explicit `for all` / `exists`, or uniqueness language)" in state_schema_text
+    assert "any proof field is already populated (`parameters`, `hypotheses`, `quantifiers`, `conclusion_clauses`, or `proof_deliverables`)" in state_schema_text
+    assert "`observables[]` references a `proof_obligation` target" in state_schema_text
     assert "claims[].proof_deliverables[]" in state_schema_text
     assert "`claims[].parameters[]`, `claims[].hypotheses[]`, and `claims[].conclusion_clauses[]` must each be non-empty." in state_schema_text
     assert "`claims[].acceptance_tests[]` must include at least one proof-specific test kind" in state_schema_text
-    assert "already exists inside the current project root" in state_schema_text
     assert "already exists inside the current project root" in state_schema_text
     assert "Placeholder or `TBD` text does not count as concrete grounding." in state_schema_text
     assert "they do not satisfy approved-mode grounding on their own" in state_schema_text

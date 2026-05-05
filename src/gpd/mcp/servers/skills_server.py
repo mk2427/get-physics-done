@@ -12,10 +12,9 @@ Usage:
 """
 
 import copy
-import dataclasses
 import re
 from collections.abc import Callable
-from functools import lru_cache
+from functools import cache, lru_cache
 from pathlib import Path
 from typing import Annotated
 
@@ -32,11 +31,13 @@ from gpd.command_labels import (
 )
 from gpd.core.errors import GPDError
 from gpd.core.observability import gpd_span
+from gpd.core.review_contract_prompt import review_contract_payload
 from gpd.mcp.servers import (
     configure_mcp_logging,
     parse_frontmatter_safe,
     published_tool_input_schema,
-    set_published_tool_input_schema,
+    refresh_string_enum_property_schema,
+    set_registered_and_published_tool_input_schema,
     stable_mcp_error,
     stable_mcp_response,
     tighten_registered_tool_contracts,
@@ -45,15 +46,27 @@ from gpd.mcp.servers import (
 logger = configure_mcp_logging("gpd-skills")
 
 mcp = FastMCP("gpd-skills")
-
-_CONTRACT_REFERENCE_NAMES = {
-    "contract-results-schema.md",
-    "peer-review-reliability.md",
-    "peer-review-panel.md",
-    "reproducibility-manifest.md",
-    "summary.md",
-    "verification-report.md",
-}
+_GENERIC_ROUTE_TOKENS = frozenset(
+    {
+        "analysis",
+        "milestone",
+        "milestones",
+        "phase",
+        "phases",
+        "project",
+        "projects",
+        "paper",
+        "papers",
+        "research",
+        "review",
+        "reviews",
+        "summary",
+        "summaries",
+        "work",
+        "workflow",
+        "workflows",
+    }
+)
 
 _SPEC_ROOT = content_registry.SPECS_DIR.resolve()
 _AGENT_ROOT = content_registry.AGENTS_DIR.resolve()
@@ -100,20 +113,11 @@ SkillCategoryFilter = str
 def _schema_with_refreshed_skill_category_enum(schema: dict[str, object]) -> dict[str, object]:
     """Return one published schema with the live skill-category enum refreshed."""
 
-    refreshed = copy.deepcopy(schema)
-    category_values = list(_skill_category_values())
-    properties = refreshed.get("properties") if isinstance(refreshed, dict) else None
-    if not isinstance(properties, dict):
-        return refreshed
-    category_schema = properties.get("category")
-    if not isinstance(category_schema, dict):
-        return refreshed
-    enum_schema = category_schema
-    any_of = category_schema.get("anyOf")
-    if isinstance(any_of, list) and any_of and isinstance(any_of[0], dict):
-        enum_schema = any_of[0]
-    enum_schema["enum"] = category_values
-    return refreshed
+    return refresh_string_enum_property_schema(
+        schema,
+        property_name="category",
+        enum_values=list(_skill_category_values()),
+    )
 
 
 def _resolve_skill(name: str) -> content_registry.SkillDef | None:
@@ -130,6 +134,46 @@ def _public_skill(skill: content_registry.SkillDef) -> dict[str, str]:
         "category": skill.category,
         "description": skill.description,
     }
+
+
+def _skill_loading_hint(*, source_kind: str, referenced_files: bool, reference_documents: bool) -> str:
+    """Return a concise, content-first loading hint for a skill payload."""
+    reference_hint = (
+        "schema_documents mirror loaded schema markdown bodies, while contract_documents mirror the remaining contract markdown bodies."
+        if reference_documents
+        else (
+            "See `referenced_files` for external markdown dependencies."
+            if referenced_files
+            else "No external markdown dependencies detected in the canonical skill body."
+        )
+    )
+    if source_kind == "command":
+        return (
+            f"{reference_hint} treat `content` as authoritative; it already embeds the model-visible "
+            "`Command Requirements` section."
+        )
+    if source_kind == "agent":
+        return (
+            f"{reference_hint} treat `content` as authoritative; it already embeds the model-visible "
+            "`Agent Requirements` section."
+        )
+    return f"{reference_hint} treat `content` as authoritative."
+
+
+def _skill_review_contract_payload(review_contract: content_registry.ReviewCommandContract | None) -> dict[str, object] | None:
+    """Return the canonical MCP payload for a command review contract."""
+    if review_contract is None:
+        return None
+    return review_contract_payload(review_contract)
+
+
+def _normalize_skill_category(category: str) -> str:
+    """Validate a skill category against the live published enum."""
+    normalized = category.strip()
+    allowed = _skill_category_values()
+    if normalized not in allowed:
+        raise ValueError(f"category must be one of: {', '.join(allowed)}")
+    return normalized
 
 
 def _skill_index_label(skill: content_registry.SkillDef) -> str:
@@ -199,34 +243,10 @@ def _agent_policy_payload(agent: content_registry.AgentDef) -> dict[str, object]
     }
 
 
-def _agent_policy_section(agent: content_registry.AgentDef) -> str:
-    rendered = "\n".join(
-        [
-            f"- `commit_authority`: `{agent.commit_authority}`",
-            f"- `surface`: `{agent.surface}`",
-            f"- `role_family`: `{agent.role_family}`",
-            f"- `artifact_write_authority`: `{agent.artifact_write_authority}`",
-            f"- `shared_state_authority`: `{agent.shared_state_authority}`",
-            "- `tools`: " + ", ".join(f"`{tool}`" for tool in agent.tools),
-        ]
-    )
-    return (
-        "## Agent Policy\n\n"
-        "The following agent contract is enforced before this skill runs. Treat it as authoritative and do not weaken it.\n\n"
-        f"{rendered}"
-    )
-
-
 def _canonical_skill_content(skill: content_registry.SkillDef) -> tuple[str, Path]:
     """Return the canonical content body and source path for a skill."""
     source_path = Path(skill.path)
-    content = skill.content
-
-    if skill.source_kind == "agent":
-        agent = content_registry.get_agent(skill.registry_name)
-        content = f"{_agent_policy_section(agent)}\n\n{content}"
-
-    return _portable_skill_content(content), source_path
+    return _portable_skill_content(skill.content), source_path
 
 
 def _normalize_allowed_tools(tools: list[str]) -> list[str]:
@@ -284,6 +304,23 @@ def _score_new_project_route(normalized_task: str, words: set[str]) -> int:
     if "project" in words and any(word in words for word in lifecycle_words):
         return 2
     return 0
+
+
+def _derived_route_keywords(skill: content_registry.SkillDef) -> list[str]:
+    """Infer route hints from the live registry name so routing does not go stale."""
+    registry_name = _normalize_route_text(skill.registry_name)
+    if not registry_name or registry_name == "new project":
+        return []
+
+    derived: list[str] = []
+    if " " in registry_name:
+        derived.append(registry_name)
+    for token in registry_name.split():
+        if token in _GENERIC_ROUTE_TOKENS:
+            continue
+        if len(token) >= 4 or token in {"todo", "todos"}:
+            derived.append(token)
+    return list(dict.fromkeys(derived))
 
 
 def _portable_reference_path(raw_path: str, *, base_path: Path | None = None) -> tuple[str, Path | None] | None:
@@ -421,18 +458,38 @@ def _extract_referenced_files(content: str, *, source_path: Path | None = None) 
 
 
 def _is_schema_reference(path: str) -> bool:
-    name = Path(path).name
-    return name.endswith("-schema.md") or name in {
-        "reproducibility-manifest.md",
-        "summary.md",
-        "verification-report.md",
-        "contract-results-schema.md",
-    }
+    if Path(path).name.endswith("-schema.md"):
+        return True
+    document_type = _reference_document_type(path)
+    if document_type is None:
+        return False
+    return any(token in document_type for token in ("schema", "template", "manifest", "tracker"))
+
+
+@cache
+def _reference_document_type(path: str) -> str | None:
+    resolved = _portable_reference_path(path)
+    reference_path = resolved[1] if resolved is not None else None
+    if reference_path is None or not reference_path.is_file():
+        return None
+    try:
+        frontmatter, _body = parse_frontmatter_safe(reference_path.read_text(encoding="utf-8"))
+    except OSError:
+        return None
+    doc_type = frontmatter.get("type") if isinstance(frontmatter, dict) else None
+    if not isinstance(doc_type, str):
+        return None
+    stripped = doc_type.strip()
+    return stripped or None
 
 
 def _is_contract_reference(path: str) -> bool:
-    name = Path(path).name
-    return _is_schema_reference(path) or name in _CONTRACT_REFERENCE_NAMES
+    if _is_schema_reference(path):
+        return True
+    document_type = _reference_document_type(path)
+    if document_type is None:
+        return False
+    return any(token in document_type for token in ("contract", "protocol", "reliability"))
 
 
 def _load_reference_document(path: str, *, kind: str) -> dict[str, object]:
@@ -494,6 +551,8 @@ def list_skills(
 
     with gpd_span("mcp.skills.list", category=category or ""):
         try:
+            if category is not None:
+                category = _normalize_skill_category(category)
             skills = [_public_skill(skill) for skill in _load_skill_index()]
             all_categories = sorted({s["category"] for s in skills})
             if category:
@@ -543,12 +602,12 @@ def get_skill(name: Annotated[str, Field(min_length=1, pattern=r"\S")]) -> dict:
             )
             contract_references, contract_documents = _expanded_reference_documents(
                 referenced_files,
-                predicate=_is_contract_reference,
+                predicate=lambda path: _is_contract_reference(path) and not _is_schema_reference(path),
             )
-            loading_hint = (
-                "schema_documents and contract_documents already include the expanded canonical bodies. Use referenced_files for any additional workflow/context docs."
-                if referenced_files
-                else "No external markdown dependencies detected in the canonical skill body."
+            loading_hint = _skill_loading_hint(
+                source_kind=skill.source_kind,
+                referenced_files=bool(referenced_files),
+                reference_documents=bool(schema_documents or contract_documents),
             )
             payload = {
                 "name": skill.name,
@@ -567,34 +626,14 @@ def get_skill(name: Annotated[str, Field(min_length=1, pattern=r"\S")]) -> dict:
             if skill.source_kind == "command":
                 command = content_registry.get_command(skill.registry_name)
                 allowed_tools = _normalize_allowed_tools(command.allowed_tools)
-                command_fields_phrase = (
-                    "`context_mode`, `project_reentry_capable`, `allowed_tools`, and any launch `requires`"
-                )
-                if command.agent is not None:
-                    command_fields_phrase = (
-                        "`context_mode`, `project_reentry_capable`, `agent`, `allowed_tools`, and any launch `requires`"
-                    )
-                command_loading_hint = (
-                    loading_hint
-                    + " The content field already includes a model-visible `Command Requirements` section for "
-                    + f"{command_fields_phrase}; "
-                    + "treat `content` as authoritative rather than injecting mirrored command metadata separately."
-                )
-                if command.review_contract is not None:
-                    command_loading_hint += (
-                        " You do not need to inject `review_contract` alongside `content` because the content field "
-                        "already includes a model-visible `Review Contract` section; `review_contract` is a mirrored projection."
-                    )
                 payload.update(
                     {
                         "context_mode": command.context_mode,
                         "project_reentry_capable": command.project_reentry_capable,
                         "argument_hint": command.argument_hint,
-                        "loading_hint": command_loading_hint,
+                        "loading_hint": loading_hint,
                         "requires": copy.deepcopy(command.requires),
-                        "review_contract": (
-                            dataclasses.asdict(command.review_contract) if command.review_contract is not None else None
-                        ),
+                        "review_contract": _skill_review_contract_payload(command.review_contract),
                         "allowed_tools_surface": "command.allowed-tools",
                         "content_authority": "canonical",
                         "structured_metadata_authority": {
@@ -618,13 +657,12 @@ def get_skill(name: Annotated[str, Field(min_length=1, pattern=r"\S")]) -> dict:
                 payload["allowed_tools_surface"] = "agent.tools"
                 payload["agent_policy"] = agent_policy
                 payload["content_authority"] = "canonical"
-                payload["loading_hint"] = (
-                    loading_hint
-                    + " The content field already includes a model-visible `Agent Policy` section for "
-                    + "`commit_authority`, `surface`, `role_family`, `artifact_write_authority`, "
-                    + "`shared_state_authority`, and `tools`; treat `content` as authoritative rather than "
-                    + "injecting mirrored agent metadata separately."
-                )
+                payload["structured_metadata_authority"] = {
+                    "content": "canonical",
+                    "allowed_tools": "mirrored",
+                    "agent_policy": "mirrored",
+                }
+                payload["loading_hint"] = loading_hint
             return stable_mcp_response(payload)
         except (GPDError, OSError, ValueError, TimeoutError) as e:
             return stable_mcp_error(e)
@@ -651,7 +689,8 @@ def route_skill(
             skills = _load_skill_index()
             if not skills:
                 return stable_mcp_response({"suggestion": None}, error="No skills available")
-            available_names = {skill.name for skill in skills}
+            skills_by_name = {skill.name: skill for skill in skills}
+            available_names = set(skills_by_name)
             normalized_task = _normalize_route_text(task_description)
 
             if "gpd-suggest-next" in available_names and any(
@@ -707,8 +746,9 @@ def route_skill(
             }
 
             scored: list[tuple[int, str]] = []
-            for skill_name, keywords in command_keywords.items():
-                if skill_name not in available_names:
+            for skill_name in available_names:
+                keywords = [*command_keywords.get(skill_name, []), *_derived_route_keywords(skills_by_name[skill_name])]
+                if not keywords:
                     continue
                 score = 0
                 for kw in keywords:
@@ -726,7 +766,8 @@ def route_skill(
             if new_project_score > 0:
                 scored.append((new_project_score, "gpd-new-project"))
 
-            scored.sort(key=lambda x: -x[0])
+            skill_order = {name: index for index, name in enumerate(skills_by_name)}
+            scored.sort(key=lambda item: (-item[0], skill_order.get(item[1], len(skill_order))))
 
             if scored:
                 best = scored[0][1]
@@ -830,7 +871,11 @@ async def _list_tools_with_fresh_skill_schema():
         schema = published_tool_input_schema(tool)
         if schema is None:
             continue
-        set_published_tool_input_schema(tool, _schema_with_refreshed_skill_category_enum(schema))
+        set_registered_and_published_tool_input_schema(
+            mcp,
+            tool,
+            _schema_with_refreshed_skill_category_enum(schema),
+        )
     return tools
 
 

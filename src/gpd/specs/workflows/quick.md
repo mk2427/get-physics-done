@@ -35,7 +35,7 @@ If empty, re-prompt: "Please provide a task description."
 **Step 2: Initialize**
 
 ```bash
-INIT=$(gpd init quick "$DESCRIPTION")
+INIT=$(gpd --raw init quick "$DESCRIPTION")
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
   # STOP — display the error to the user and do not proceed.
@@ -53,7 +53,7 @@ Parse JSON for: `planner_model`, `executor_model`, `commit_docs`, `autonomy`, `n
 
 Quick tasks can run mid-phase and do NOT require ROADMAP.md. They only need `GPD/` to exist for directory structure.
 Quick mode still inherits the approved `project_contract` only when `project_contract_gate.authoritative` is true, and it still inherits the active reference ledger. Do not bypass required anchors, baselines, or forbidden-proxy constraints just because the task is small.
-Before planning, also load `{GPD_INSTALL_DIR}/templates/planner-subagent-prompt.md`, `{GPD_INSTALL_DIR}/templates/phase-prompt.md`, and `{GPD_INSTALL_DIR}/templates/plan-contract-schema.md` so the canonical PLAN structure and contract rules are visible to the planner before it writes anything.
+Before planning, load the shared planner template, phase template, and canonical contract schema.
 
 **Proof-obligation command block:** If the description or inherited contract indicates theorem-style work (`proof_obligation`, `theorem`, `lemma`, `corollary`, `proposition`, `claim`, `proof`, `prove`, `show that`, `existence`, `uniqueness`), STOP instead of using quick mode. Do not bypass this by asking for a "quick sketch", "light proof", or "just the main idea". Route explicitly to:
 
@@ -91,7 +91,7 @@ Spawn gpd-planner with quick mode context:
 task(
   prompt="First, read {GPD_AGENTS_DIR}/gpd-planner.md for your role and instructions.
 
-Then read {GPD_INSTALL_DIR}/templates/planner-subagent-prompt.md, {GPD_INSTALL_DIR}/templates/phase-prompt.md, and {GPD_INSTALL_DIR}/templates/plan-contract-schema.md before drafting the plan. Those files are the canonical sources for PLAN frontmatter and contract completeness.
+Then read {GPD_INSTALL_DIR}/templates/planner-subagent-prompt.md, {GPD_INSTALL_DIR}/templates/phase-prompt.md, and {GPD_INSTALL_DIR}/templates/plan-contract-schema.md before drafting the plan.
 
 <planning_context>
 

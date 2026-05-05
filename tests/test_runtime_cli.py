@@ -23,7 +23,7 @@ from gpd.hooks.install_metadata import GPD_INSTALL_DIR_NAME
 from gpd.runtime_cli import _parse_args, _resolve_cli_cwd_from_argv, main
 from tests.runtime_install_helpers import seed_complete_runtime_install
 
-_RUNTIME_DESCRIPTORS = iter_runtime_descriptors()
+_RUNTIME_DESCRIPTORS = tuple(iter_runtime_descriptors())
 _RUNTIME_NAMES = tuple(descriptor.runtime_name for descriptor in _RUNTIME_DESCRIPTORS)
 _SHARED_INSTALL = get_shared_install_metadata()
 MANIFEST_NAME = _SHARED_INSTALL.manifest_name
@@ -889,7 +889,11 @@ def test_runtime_cli_reexecs_from_installed_package_using_forwarded_cli_cwd(
     checkout_root = tmp_path / "checkout"
     checkout_src = checkout_root / "src"
     (checkout_src / "gpd").mkdir(parents=True)
-    checkout_python = checkout_root / ".venv" / "bin" / "python"
+    checkout_python = (
+        checkout_root / ".venv" / "Scripts" / "python.exe"
+        if os.name == "nt"
+        else checkout_root / ".venv" / "bin" / "python"
+    )
     checkout_python.parent.mkdir(parents=True)
     checkout_python.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
     forwarded_cwd = checkout_root / "workspace" / "nested"

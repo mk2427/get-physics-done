@@ -525,6 +525,8 @@ async def _compile_manual_multipass(tex_path: Path, output_dir: Path, compiler: 
         bibtex = find_latex_compiler("bibtex")
         if not bibtex:
             record_missing_bibtex_requirement()
+            if fatal_errors:
+                return CompilationResult(success=False, error=fatal_errors[0], log="".join(combined_log_parts)[-5000:])
         if bibtex and aux_path.exists():
             returncode, log = await run_cmd([bibtex, str(aux_path)], cwd)
             record_result("bibtex", returncode, log, fatal=True)
@@ -564,6 +566,12 @@ async def _compile_manual_multipass(tex_path: Path, output_dir: Path, compiler: 
                 record_result("bibtex autofix", returncode, log, fatal=True)
             if not bibtex:
                 record_missing_bibtex_requirement()
+                if fatal_errors:
+                    return CompilationResult(
+                        success=False,
+                        error=fatal_errors[0],
+                        log="".join(combined_log_parts)[-5000:],
+                    )
             returncode, log = await run_cmd(base_cmd, cwd)
             record_result("pdflatex autofix pass 2", returncode, log)
             returncode, log = await run_cmd(base_cmd, cwd)

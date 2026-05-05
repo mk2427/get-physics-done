@@ -1663,17 +1663,19 @@ def test_publication_review_surfaces_keep_protocol_bundle_guidance_additive() ->
     assert "protocol_bundle_context" in peer_review
     assert "${MANUSCRIPT_ROOT}/FIGURE_TRACKER.md" in peer_review
     assert "GPD/comparisons/*-COMPARISON.md" in peer_review
-    assert "Treat bundle guidance as additive skepticism only." in peer_review
-    assert "Review-support artifacts are scaffolding, not substitutes for contract-backed evidence." in peer_review
+    assert "Treat bundle guidance as additive skepticism only" in peer_review
+    assert "review-support artifacts are scaffolding, not substitutes for contract-backed evidence" in peer_review
 
     assert "protocol_bundle_context" in respond
     assert "missing decisive evidence we already owed" in respond
     assert "prefer fulfilling that existing obligation or narrowing the claim" in respond
     assert "Treat referee requests beyond the manuscript's honest scope as optional unless they expose a real support gap" in respond
 
-    assert "protocol_bundle_ids (optional):" in internal_template
-    assert "bundle_expectations (optional):" in internal_template
+    assert "protocol_bundle_ids (optional):" not in internal_template
+    assert "bundle_expectations (optional):" not in internal_template
+    assert "omit `protocol_bundle_ids` and `bundle_expectations` entirely" in internal_template.lower()
     assert "additive provenance" in internal_template
-    assert "protocol_bundle_ids (optional):" in experimental_template
-    assert "bundle_expectations (optional):" in experimental_template
+    assert "protocol_bundle_ids (optional):" not in experimental_template
+    assert "bundle_expectations (optional):" not in experimental_template
+    assert "omit `protocol_bundle_ids` and `bundle_expectations` entirely" in experimental_template.lower()
     assert "additive provenance" in experimental_template

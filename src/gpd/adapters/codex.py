@@ -36,13 +36,13 @@ from gpd.adapters.install_utils import (
     MANIFEST_NAME,
     PATCHES_DIR_NAME,
     UPDATE_CACHE_FILENAME,
+    _move_install_dir,
     compile_markdown_for_runtime,
     convert_tool_references_in_body,
     expand_tilde,
     get_global_dir,
     hook_python_interpreter,
     managed_hook_paths,
-    materialize_first_round_review_schema_headings,
     pre_install_cleanup,
     prune_empty_ancestors,
     remove_empty_text_file,
@@ -58,9 +58,6 @@ from gpd.adapters.tool_names import build_runtime_alias_map, reference_translati
 from gpd.core.observability import gpd_span
 from gpd.mcp import managed_integrations as _managed_integrations
 from gpd.registry import AgentDef, load_agents_from_dir
-
-WOLFRAM_MANAGED_INTEGRATION = _managed_integrations.WOLFRAM_MANAGED_INTEGRATION
-WOLFRAM_MANAGED_SERVER_KEY = _managed_integrations.WOLFRAM_MANAGED_SERVER_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -209,7 +206,11 @@ def _resolve_codex_skills_dir(target_dir: Path, *, is_global: bool, skills_dir: 
 
 
 def _load_manifest_codex_skills_dir(target_dir: Path) -> Path | None:
-    """Return the install-time Codex skills dir recorded in the local manifest."""
+    """Return the install-time Codex skills dir recorded in the local manifest.
+
+    `codex_skills_dir` is the only authoritative manifest key for Codex skill
+    ownership and uninstall validation.
+    """
     manifest_path = target_dir / MANIFEST_NAME
     if not manifest_path.exists():
         return None
@@ -254,17 +255,6 @@ def _load_manifest_codex_generated_skill_dirs(target_dir: Path) -> tuple[str, ..
 def _planned_installed_codex_skill_dirs(target_dir: Path) -> tuple[str, ...]:
     """Return generated Codex skill directories inferable from installed command files."""
     commands_dir = target_dir / GPD_INSTALL_DIR_NAME / COMMANDS_DIR_NAME
-    if not commands_dir.is_dir():
-        return ()
-    try:
-        return tuple(sorted(_planned_codex_skill_dirs(commands_dir, "gpd")))
-    except OSError:
-        return ()
-
-
-def _planned_source_codex_skill_dirs() -> tuple[str, ...]:
-    """Return generated Codex skill directories inferable from the packaged source tree."""
-    commands_dir = Path(__file__).resolve().parents[1] / COMMANDS_DIR_NAME
     if not commands_dir.is_dir():
         return ()
     try:
@@ -329,9 +319,13 @@ def _tracked_codex_generated_skill_dirs(
     target_dir: Path,
     *,
     skills_dir: Path | None = None,
-    allow_packaged_source_fallback: bool = True,
 ) -> tuple[str, ...]:
-    """Return generated skill names when ownership evidence is unambiguous."""
+    """Return generated skill names when ownership evidence is unambiguous.
+
+    Only live install evidence is authoritative here: manifest-tracked files,
+    managed markers inside the skills tree, and the installed command tree.
+    Packaged source content is not an install-ownership signal.
+    """
     candidates: list[set[str]] = []
 
     live_managed = _load_live_managed_codex_skill_dirs(skills_dir)
@@ -355,11 +349,6 @@ def _tracked_codex_generated_skill_dirs(
     planned = _planned_installed_codex_skill_dirs(target_dir)
     if planned:
         return tuple(sorted(planned))
-
-    if allow_packaged_source_fallback:
-        planned_source = _planned_source_codex_skill_dirs()
-        if planned_source:
-            return tuple(sorted(planned_source))
 
     return ()
 
@@ -1150,7 +1139,11 @@ class CodexAdapter(RuntimeAdapter):
         return (*super().install_completeness_relpaths(), "config.toml")
 
     def missing_install_artifacts(self, target_dir: Path) -> tuple[str, ...]:
-        """Return missing Codex install artifacts, including the shared skills dir."""
+        """Return missing Codex install artifacts, including the shared skills dir.
+
+        The shared skills directory is considered present only when the install
+        can justify its generated skill set from manifest or live install data.
+        """
         missing = list(super().missing_install_artifacts(target_dir))
 
         skills_dir = _load_manifest_codex_skills_dir(target_dir)
@@ -1213,7 +1206,6 @@ class CodexAdapter(RuntimeAdapter):
             tracked_skill_dirs = _tracked_codex_generated_skill_dirs(
                 target_dir,
                 skills_dir=skills_dir,
-                allow_packaged_source_fallback=False,
             )
 
             # 1. Remove generated GPD skill directories tracked in the manifest,
@@ -1396,11 +1388,11 @@ def _copy_commands_as_skills(
 
         if skills_dir.exists():
             live_backup = staging_root / f"{skills_dir.name}.backup"
-            skills_dir.rename(live_backup)
-        staged_skills_dir.rename(skills_dir)
+            _move_install_dir(skills_dir, live_backup)
+        _move_install_dir(staged_skills_dir, skills_dir)
     except Exception:
         if live_backup is not None and live_backup.exists() and not skills_dir.exists():
-            live_backup.rename(skills_dir)
+            _move_install_dir(live_backup, skills_dir)
         raise
     finally:
         if live_backup is not None and live_backup.exists():
@@ -1526,7 +1518,6 @@ def _copy_agents_as_agent_files(
             src_root=source_root,
             protect_agent_prompt_body=True,
         )
-        content = materialize_first_round_review_schema_headings(content)
         content = convert_tool_references_in_body(content, _TOOL_REFERENCE_MAP)
         content = _rewrite_codex_gpd_cli_invocations(content, launcher)
         content = _normalize_codex_questioning(content)
@@ -1891,16 +1882,12 @@ def _build_managed_optional_mcp_servers(
     env: Mapping[str, str] | None = None,
 ) -> dict[str, dict[str, object]]:
     """Return optional managed MCP servers that are currently configured."""
-    if WOLFRAM_MANAGED_INTEGRATION is None:
-        return {}
-    if not WOLFRAM_MANAGED_INTEGRATION.is_configured(env, cwd=cwd, strict=True):
-        return {}
-    return {WOLFRAM_MANAGED_SERVER_KEY: WOLFRAM_MANAGED_INTEGRATION.projected_server_entry(env, cwd=cwd, strict=True)}
+    return _managed_integrations.projected_managed_optional_mcp_servers(env, cwd=cwd)
 
 
 def _managed_optional_mcp_server_keys() -> frozenset[str]:
     """Return optional managed MCP server keys removed during uninstall."""
-    return frozenset({WOLFRAM_MANAGED_SERVER_KEY})
+    return _managed_integrations.managed_optional_mcp_server_keys()
 
 
 def _remove_gpd_mcp_toml_sections(content: str, *, extra_keys: set[str] | None = None) -> str:

@@ -6,8 +6,12 @@ error-handling pattern used by every other tool in state_server.py.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from gpd.core.errors import GPDError
 from gpd.mcp.servers.state_server import advance_plan, validate_state
+
+FAKE_PROJECT_DIR = str((Path.cwd() / "__fake_mcp_project__").resolve(strict=False))
 
 
 class TestAdvancePlanErrorHandling:
@@ -18,7 +22,7 @@ class TestAdvancePlanErrorHandling:
             "gpd.mcp.servers.state_server.state_advance_plan",
             lambda _cwd: (_ for _ in ()).throw(GPDError("test error")),
         )
-        result = advance_plan("/tmp/fake")
+        result = advance_plan(FAKE_PROJECT_DIR)
         assert result == {"error": "test error", "schema_version": 1}
 
     def test_os_error(self, monkeypatch):
@@ -26,7 +30,7 @@ class TestAdvancePlanErrorHandling:
             "gpd.mcp.servers.state_server.state_advance_plan",
             lambda _cwd: (_ for _ in ()).throw(OSError("file not found")),
         )
-        result = advance_plan("/tmp/fake")
+        result = advance_plan(FAKE_PROJECT_DIR)
         assert result == {"error": "file not found", "schema_version": 1}
 
 
@@ -38,7 +42,7 @@ class TestValidateStateErrorHandling:
             "gpd.mcp.servers.state_server.state_validate",
             lambda _cwd: (_ for _ in ()).throw(GPDError("bad state")),
         )
-        result = validate_state("/tmp/fake")
+        result = validate_state(FAKE_PROJECT_DIR)
         assert result == {"error": "bad state", "schema_version": 1}
 
     def test_value_error(self, monkeypatch):
@@ -46,5 +50,5 @@ class TestValidateStateErrorHandling:
             "gpd.mcp.servers.state_server.state_validate",
             lambda _cwd: (_ for _ in ()).throw(ValueError("invalid")),
         )
-        result = validate_state("/tmp/fake")
+        result = validate_state(FAKE_PROJECT_DIR)
         assert result == {"error": "invalid", "schema_version": 1}

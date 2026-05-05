@@ -75,7 +75,7 @@ def test_resolve_checkout_python_prefers_checkout_local_virtualenv(tmp_path: Pat
     repo_root = _make_checkout(tmp_path, "9.9.9")
     nested = repo_root / "research" / "project"
     nested.mkdir(parents=True)
-    checkout_python = repo_root / ".venv" / "bin" / "python"
+    checkout_python = repo_root / ".venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
     checkout_python.parent.mkdir(parents=True)
     checkout_python.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
 import shutil
@@ -99,6 +100,19 @@ class PlanToolCheck(BaseModel):
 _TOOL_REQUIREMENTS_ADAPTER = TypeAdapter(list[PlanToolRequirement])
 
 
+def _validate_unique_tool_requirement_ids(requirements: list[PlanToolRequirement]) -> None:
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for requirement in requirements:
+        if requirement.id in seen:
+            duplicates.append(requirement.id)
+            continue
+        seen.add(requirement.id)
+    if duplicates:
+        duplicate_list = ", ".join(repr(item) for item in duplicates)
+        raise PlanToolPreflightError(f"tool_requirements[].id values must be unique; duplicate ids: {duplicate_list}")
+
+
 class PlanToolPreflightResult(BaseModel):
     """Summary of specialized-tool readiness for a PLAN.md file."""
 
@@ -170,7 +184,9 @@ def parse_plan_tool_requirements(raw: object) -> list[PlanToolRequirement]:
     if raw == []:
         return []
     try:
-        return _TOOL_REQUIREMENTS_ADAPTER.validate_python(raw)
+        requirements = _TOOL_REQUIREMENTS_ADAPTER.validate_python(raw)
+        _validate_unique_tool_requirement_ids(requirements)
+        return requirements
     except PydanticValidationError as exc:
         raise PlanToolPreflightError(_format_validation_error(exc)) from exc
     except (TypeError, ValueError) as exc:
@@ -179,9 +195,16 @@ def parse_plan_tool_requirements(raw: object) -> list[PlanToolRequirement]:
 
 def _split_command_argv(command: str) -> tuple[list[str] | None, str | None]:
     try:
-        return shlex.split(command, posix=True) if command else [], None
+        protected = command.replace("\\", "\\\\") if os.name == "nt" else command
+        return shlex.split(protected, posix=True) if protected else [], None
     except ValueError as exc:
         return None, f"could not parse command requirement: {exc}"
+
+
+def _display_probe_path(path: str) -> str:
+    if path.startswith("/"):
+        return path
+    return str(Path(path).resolve(strict=False))
 
 
 def _env_wrapped_argv(argv: list[str]) -> tuple[list[str] | None, str | None]:
@@ -373,6 +396,18 @@ def _workspace_roots_for_command(cwd: Path | None) -> list[Path]:
     return roots
 
 
+def _path_within_workspace_roots(path: Path, *, cwd: Path | None) -> bool:
+    """Return whether a resolved command target stays inside the allowed project roots."""
+
+    for root in _workspace_roots_for_command(cwd):
+        try:
+            path.relative_to(root.resolve(strict=False))
+            return True
+        except ValueError:
+            continue
+    return False
+
+
 def _missing_python_script_target_issue(target: str, *, cwd: Path | None) -> str | None:
     target_path = Path(target).expanduser()
     candidate_paths: list[Path] = []
@@ -385,9 +420,20 @@ def _missing_python_script_target_issue(target: str, *, cwd: Path | None) -> str
     if not candidate_paths:
         return None
 
+    out_of_workspace: list[Path] = []
     for candidate_path in candidate_paths:
-        if candidate_path.exists():
+        if not candidate_path.exists():
+            continue
+        if _path_within_workspace_roots(candidate_path, cwd=cwd):
             return None
+        out_of_workspace.append(candidate_path)
+
+    if out_of_workspace:
+        formatted_paths = ", ".join(str(path) for path in out_of_workspace)
+        return (
+            f"repo-local script target must stay within the project roots: {target} "
+            f"(resolved outside {formatted_paths})"
+        )
 
     formatted_candidates = ", ".join(str(path) for path in candidate_paths)
     return f"repo-local script target not found: {target} (looked under {formatted_candidates})"
@@ -482,7 +528,7 @@ def _probe_tool(requirement: PlanToolRequirement, *, cwd: Path | None = None) ->
             target_issue = _command_target_issue(command, cwd=cwd)
             if target_issue is not None:
                 return False, target_issue, "command", []
-            return True, f"{executable} found at {Path(path).resolve(strict=False)}", "command", []
+            return True, f"{executable} found at {_display_probe_path(path)}", "command", []
         return False, f"{executable} not found on PATH", "command", []
 
     if requirement.tool == "wolfram":
@@ -491,14 +537,14 @@ def _probe_tool(requirement: PlanToolRequirement, *, cwd: Path | None = None) ->
         if path:
             return (
                 True,
-                f"wolframscript found at {Path(path).resolve(strict=False)}",
+                f"wolframscript found at {_display_probe_path(path)}",
                 "wolframscript",
                 warnings,
             )
 
         integration = get_managed_integration("wolfram")
-        if integration is not None and integration.is_configured(cwd=cwd, strict=True):
-            endpoint = integration.resolved_endpoint(cwd=cwd, strict=True)
+        if integration is not None and integration.is_configured(cwd=cwd):
+            endpoint = integration.resolved_endpoint(cwd=cwd)
             return (
                 True,
                 (
@@ -522,7 +568,7 @@ def _probe_tool(requirement: PlanToolRequirement, *, cwd: Path | None = None) ->
     path = shutil.which(spec.command)
     warnings = [spec.warning] if spec.warning else []
     if path:
-        return True, f"{spec.command} found at {Path(path).resolve(strict=False)}", spec.provider, warnings
+        return True, f"{spec.command} found at {_display_probe_path(path)}", spec.provider, warnings
     return False, f"{spec.command} not found on PATH", spec.provider, warnings
 
 

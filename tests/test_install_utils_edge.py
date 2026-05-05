@@ -57,6 +57,11 @@ def _bundled_hook_text(name: str) -> str:
     return (Path(__file__).resolve().parents[1] / "src" / "gpd" / "hooks" / name).read_text(encoding="utf-8")
 
 
+def _managed_venv_python(gpd_home: Path) -> Path:
+    relpath = Path("Scripts/python.exe") if os.name == "nt" else Path("bin/python")
+    return gpd_home / "venv" / relpath
+
+
 # =========================================================================
 # 1. expand_at_includes
 # =========================================================================
@@ -775,7 +780,7 @@ class TestBuildHookCommand:
 
     def test_defaults_to_hidden_home_venv_when_gpd_home_is_unset(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         fake_home = tmp_path / "home"
-        managed_python = fake_home / HOME_DATA_DIR_NAME / "venv" / "bin" / "python"
+        managed_python = _managed_venv_python(fake_home / HOME_DATA_DIR_NAME)
         managed_python.parent.mkdir(parents=True)
         managed_python.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
 
@@ -790,7 +795,7 @@ class TestBuildHookCommand:
 
     def test_prefers_managed_gpd_python_outside_checkout(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         managed_home = tmp_path / "managed-home"
-        managed_python = managed_home / "venv" / "bin" / "python"
+        managed_python = _managed_venv_python(managed_home)
         managed_python.parent.mkdir(parents=True)
         managed_python.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
 
@@ -806,7 +811,7 @@ class TestBuildHookCommand:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         managed_home = tmp_path / "managed-home"
-        managed_python = managed_home / "venv" / "bin" / "python"
+        managed_python = _managed_venv_python(managed_home)
         managed_python.parent.mkdir(parents=True)
         managed_python.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
 
@@ -824,7 +829,7 @@ class TestBuildHookCommand:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         managed_home = tmp_path / "managed-home"
-        managed_python = managed_home / "venv" / "bin" / "python"
+        managed_python = _managed_venv_python(managed_home)
         managed_python.parent.mkdir(parents=True)
         managed_python.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
 
@@ -849,7 +854,7 @@ class TestBuildHookCommand:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         managed_home = tmp_path / "managed-home"
-        managed_python = managed_home / "venv" / "bin" / "python"
+        managed_python = _managed_venv_python(managed_home)
         managed_python.parent.mkdir(parents=True)
         managed_python.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
 
@@ -1056,18 +1061,18 @@ class TestWriteSettings:
         assert "  " in content  # indented
 
     def test_atomic_semantics_no_partial_write(self, tmp_path: Path) -> None:
-        """If the rename step failed, original file should be untouched."""
+        """If the replace step failed, original file should be untouched."""
         target = tmp_path / "settings.json"
         target.write_text('{"original": true}', encoding="utf-8")
 
-        # Patch rename to fail
-        with patch.object(Path, "rename", side_effect=OSError("rename failed")):
-            with pytest.raises(OSError, match="rename failed"):
+        with patch.object(Path, "replace", side_effect=OSError("replace failed")):
+            with pytest.raises(OSError, match="replace failed"):
                 write_settings(target, {"new": True})
 
-        # Original should be intact (write_text succeeded on .tmp, rename failed)
+        # Original should be intact (write_text succeeded on .tmp, replace failed).
         data = json.loads(target.read_text(encoding="utf-8"))
         assert data == {"original": True}
+        assert not target.with_suffix(".tmp").exists()
 
 
 # =========================================================================

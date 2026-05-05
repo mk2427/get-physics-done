@@ -16,10 +16,13 @@ from gpd.mcp.servers.state_server import (
     get_phase_info,
     get_progress,
     get_state,
+    load_state_json,
     mcp,
     run_health_check,
     validate_state,
 )
+
+FAKE_PROJECT_DIR = str((Path.cwd() / "__fake_mcp_project__").resolve(strict=False))
 
 
 async def _tool_names() -> list[str]:
@@ -62,13 +65,13 @@ def test_state_server_tools_reject_non_absolute_project_dirs(tool_fn, kwargs: di
 @pytest.mark.parametrize(
     ("tool_fn", "patch_target", "kwargs"),
     [
-        (get_state, "gpd.mcp.servers.state_server.load_state_json", {"project_dir": "/tmp/fake"}),
-        (get_phase_info, "gpd.core.phases.find_phase", {"project_dir": "/tmp/fake", "phase": "01"}),
-        (advance_plan, "gpd.mcp.servers.state_server.state_advance_plan", {"project_dir": "/tmp/fake"}),
-        (get_progress, "gpd.mcp.servers.state_server.progress_render", {"project_dir": "/tmp/fake"}),
-        (validate_state, "gpd.mcp.servers.state_server.state_validate", {"project_dir": "/tmp/fake"}),
-        (run_health_check, "gpd.mcp.servers.state_server.run_health", {"project_dir": "/tmp/fake", "fix": False}),
-        (get_config, "gpd.mcp.servers.state_server.load_config", {"project_dir": "/tmp/fake"}),
+        (get_state, "gpd.mcp.servers.state_server.load_state_json", {"project_dir": FAKE_PROJECT_DIR}),
+        (get_phase_info, "gpd.core.phases.find_phase", {"project_dir": FAKE_PROJECT_DIR, "phase": "01"}),
+        (advance_plan, "gpd.mcp.servers.state_server.state_advance_plan", {"project_dir": FAKE_PROJECT_DIR}),
+        (get_progress, "gpd.mcp.servers.state_server.progress_render", {"project_dir": FAKE_PROJECT_DIR}),
+        (validate_state, "gpd.mcp.servers.state_server.state_validate", {"project_dir": FAKE_PROJECT_DIR}),
+        (run_health_check, "gpd.mcp.servers.state_server.run_health", {"project_dir": FAKE_PROJECT_DIR, "fix": False}),
+        (get_config, "gpd.mcp.servers.state_server.load_config", {"project_dir": FAKE_PROJECT_DIR}),
     ],
 )
 @pytest.mark.parametrize("error_factory", [lambda: GPDError("boom"), lambda: OSError("missing"), lambda: ValueError("bad")])
@@ -82,6 +85,48 @@ def test_state_server_tools_return_stable_error_envelopes(tool_fn, patch_target:
 
     assert result["schema_version"] == 1
     assert result["error"] in {"boom", "missing", "bad"}
+
+
+def test_load_state_json_strips_legacy_session_and_surfaces_contract_gate(monkeypatch, tmp_path: Path) -> None:
+    state_obj = {
+        "position": {"current_phase": "01"},
+        "decisions": [],
+        "blockers": [],
+        "session": {"last_date": "2026-01-01"},
+    }
+
+    monkeypatch.setattr(
+        "gpd.mcp.servers.state_server.peek_state_json",
+        lambda *_args, **_kwargs: (state_obj, [], "state.json"),
+    )
+    monkeypatch.setattr(
+        "gpd.mcp.servers.state_server._project_contract_runtime_payload_for_state",
+        lambda *_args, **_kwargs: (
+            {"status": "loaded"},
+            {"valid": True},
+            {"authoritative": True},
+        ),
+    )
+
+    result = load_state_json(tmp_path)
+
+    assert result is not None
+    assert "session" not in result
+    assert result["position"]["current_phase"] == "01"
+    assert result["project_contract_load_info"]["status"] == "loaded"
+    assert result["project_contract_validation"]["valid"] is True
+    assert result["project_contract_gate"]["authoritative"] is True
+
+
+def test_get_state_reports_current_project_state_guidance(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("gpd.mcp.servers.state_server.load_state_json", lambda *_args, **_kwargs: None)
+
+    result = get_state(str(tmp_path))
+
+    assert result == {
+        "error": "No project state found. Run 'gpd init' to initialize a GPD project state.",
+        "schema_version": 1,
+    }
 
 
 def test_get_progress_does_not_mutate_checkpoint_shelf_artifacts(tmp_path: Path) -> None:

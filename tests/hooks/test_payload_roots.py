@@ -16,6 +16,12 @@ from gpd.hooks.payload_roots import (
 )
 
 
+def _mark_project(project) -> None:
+    gpd_dir = project / "GPD"
+    gpd_dir.mkdir(parents=True, exist_ok=True)
+    (gpd_dir / "state.json").write_text("{}", encoding="utf-8")
+
+
 def _policy(
     *,
     workspace_keys: tuple[str, ...] = ("cwd",),
@@ -198,7 +204,7 @@ def test_project_root_from_payload_prefers_explicit_project_dir_alias(tmp_path) 
     workspace = tmp_path / "project" / "src" / "notes"
     project = tmp_path / "project"
     workspace.mkdir(parents=True)
-    (project / "GPD").mkdir()
+    _mark_project(project)
 
     result = project_root_from_payload(
         {"workspace": {"current_dir": str(workspace), "project_root": str(project)}},
@@ -228,7 +234,7 @@ def test_project_root_from_payload_uses_workspace_dir_as_policy_context_when_cwd
     project = tmp_path / "project"
     workspace.mkdir()
     project.mkdir()
-    (project / "GPD").mkdir()
+    _mark_project(project)
     policy_getter = Mock(return_value=_policy(project_dir_keys=("project_root",)))
 
     result = project_root_from_payload(
@@ -245,7 +251,7 @@ def test_resolve_payload_roots_preserves_raw_workspace_and_resolved_project_root
     project = tmp_path / "project"
     workspace = project / "src" / "notes"
     workspace.mkdir(parents=True)
-    (project / "GPD").mkdir()
+    _mark_project(project)
 
     roots = resolve_payload_roots(
         {"workspace": {"cwd": str(workspace), "project_dir": str(project)}},
@@ -263,7 +269,7 @@ def test_resolve_payload_roots_marks_untrusted_project_dir_when_workspace_walkup
     project = tmp_path / "project"
     workspace = project / "src" / "notes"
     workspace.mkdir(parents=True)
-    (project / "GPD").mkdir()
+    _mark_project(project)
 
     roots = resolve_payload_roots(
         {"workspace": {"cwd": str(workspace), "project_dir": str(tmp_path / "stale-project-dir")}},
@@ -280,7 +286,7 @@ def test_resolve_payload_roots_trusts_explicit_project_dir_when_it_is_the_select
     project = tmp_path / "project"
     workspace = project / "src" / "notes"
     workspace.mkdir(parents=True)
-    (project / "GPD").mkdir()
+    _mark_project(project)
 
     roots = resolve_payload_roots(
         {"workspace": {"cwd": str(workspace), "project_dir": str(project)}},
@@ -313,11 +319,11 @@ def test_resolve_payload_roots_rejects_unrelated_verified_project_dir_hint(tmp_p
     project = tmp_path / "project"
     workspace = project / "src" / "notes"
     workspace.mkdir(parents=True)
-    (project / "GPD").mkdir()
+    _mark_project(project)
 
     unrelated = tmp_path / "other-project"
     unrelated.mkdir()
-    (unrelated / "GPD").mkdir()
+    _mark_project(unrelated)
 
     roots = resolve_payload_roots(
         {"workspace": {"cwd": str(workspace), "project_dir": str(unrelated)}},
@@ -336,7 +342,7 @@ def test_resolve_payload_roots_ignores_unrelated_verified_project_dir_when_works
 
     unrelated = tmp_path / "other-project"
     unrelated.mkdir()
-    (unrelated / "GPD").mkdir()
+    _mark_project(unrelated)
 
     roots = resolve_payload_roots(
         {"workspace": {"cwd": str(workspace), "project_dir": str(unrelated)}},
@@ -353,7 +359,7 @@ def test_project_root_from_payload_prefers_policy_root_resolution_service(tmp_pa
     project = tmp_path / "project"
     workspace = project / "src" / "notes"
     project.mkdir(parents=True)
-    (project / "GPD").mkdir()
+    _mark_project(project)
     workspace.mkdir(parents=True, exist_ok=True)
     service = Mock(
         return_value={
@@ -380,7 +386,7 @@ def test_resolve_payload_roots_accepts_compatibility_aliases_from_shared_service
     project = tmp_path / "project"
     workspace = project / "src" / "notes"
     workspace.mkdir(parents=True)
-    (project / "GPD").mkdir()
+    _mark_project(project)
     service = Mock(
         return_value=SimpleNamespace(
             raw_workspace_dir=str(workspace),
@@ -407,7 +413,7 @@ def test_resolve_payload_roots_keeps_raw_workspace_when_service_only_returns_pro
     project = tmp_path / "project"
     workspace = project / "src" / "notes"
     workspace.mkdir(parents=True)
-    (project / "GPD").mkdir()
+    _mark_project(project)
     service = Mock(return_value=str(project))
 
     roots = resolve_payload_roots(

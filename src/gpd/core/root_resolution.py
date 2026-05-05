@@ -16,7 +16,13 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from gpd.core.constants import ProjectLayout
+from gpd.core.constants import (
+    PROJECT_FILENAME,
+    ROADMAP_FILENAME,
+    STATE_JSON_FILENAME,
+    STATE_MD_FILENAME,
+    ProjectLayout,
+)
 
 __all__ = [
     "ProjectRootResolution",
@@ -57,7 +63,7 @@ class ProjectRootResolution:
 
     @property
     def verified(self) -> bool:
-        """Return whether the result was verified by locating a ``GPD/`` directory."""
+        """Return whether the result was verified by locating a marked ``GPD/`` project."""
         return self.has_project_layout
 
 
@@ -83,14 +89,32 @@ def normalize_workspace_hint(value: Path | str | None) -> Path | None:
         return expanded
 
 
+_PROJECT_MARKER_FILENAMES = (
+    STATE_JSON_FILENAME,
+    STATE_MD_FILENAME,
+    ROADMAP_FILENAME,
+    PROJECT_FILENAME,
+)
+
+
+def _has_project_root_marker(layout: ProjectLayout) -> bool:
+    """Return whether ``layout`` has enough structure to prove a project root."""
+
+    if not layout.gpd.is_dir():
+        return False
+    if any((layout.gpd / filename).is_file() for filename in _PROJECT_MARKER_FILENAMES):
+        return True
+    return layout.phases_dir.is_dir()
+
+
 def _walk_project_root(candidate: Path | None) -> tuple[Path | None, int]:
-    """Walk *candidate* and its ancestors until a ``GPD/`` layout is found."""
+    """Walk *candidate* and its ancestors until a marked ``GPD/`` project is found."""
 
     if candidate is None:
         return None, 0
 
     for steps, path in enumerate((candidate, *candidate.parents)):
-        if ProjectLayout(path).gpd.is_dir():
+        if _has_project_root_marker(ProjectLayout(path)):
             return path, steps
     return None, 0
 

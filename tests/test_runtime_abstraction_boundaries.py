@@ -68,6 +68,12 @@ def _runtime_literal_patterns() -> list[str]:
 
 def _runtime_capability_surface_patterns() -> list[str]:
     patterns: set[str] = set()
+    special_permission_surface_kinds = frozenset(
+        descriptor.capabilities.permission_surface_kind
+        for descriptor in _RUNTIME_DESCRIPTORS
+        if descriptor.capabilities.permissions_surface != "config-file"
+        and descriptor.capabilities.permission_surface_kind != "none"
+    )
     for descriptor in _RUNTIME_DESCRIPTORS:
         capabilities = descriptor.capabilities
         for value in (
@@ -75,9 +81,9 @@ def _runtime_capability_surface_patterns() -> list[str]:
             capabilities.statusline_config_surface,
             capabilities.notify_config_surface,
         ):
-            if value and value not in {"none", "managed-launcher-wrapper"}:
+            if value and value not in {"none", *special_permission_surface_kinds}:
                 patterns.add(re.escape(value))
-        if capabilities.permission_surface_kind == "managed-launcher-wrapper":
+        if capabilities.permission_surface_kind in special_permission_surface_kinds:
             patterns.add(re.escape(capabilities.permission_surface_kind))
     return sorted(patterns)
 
@@ -87,7 +93,7 @@ def _runtime_native_command_prefix_patterns() -> list[str]:
         {
             re.escape(descriptor.command_prefix)
             for descriptor in _RUNTIME_DESCRIPTORS
-            if descriptor.command_prefix in {"/gpd:", "$gpd-"}
+            if descriptor.command_prefix == "$gpd-"
         }
     )
 
@@ -608,3 +614,19 @@ def test_readme_optional_terminal_reference_uses_runtime_placeholders() -> None:
     assert "relaunch Codex" not in block
     assert "--<runtime-flag>" in block
     assert "--runtime <runtime>" in block
+
+
+def test_user_facing_runtime_command_hints_use_runtime_placeholder() -> None:
+    leaks = _scan_paths_for_pattern(
+        (
+            REPO_ROOT / "src/gpd/cli.py",
+            REPO_ROOT / "src/gpd/core/health.py",
+            REPO_ROOT / "src/gpd/specs/workflows/new-project.md",
+        ),
+        re.compile(r"--runtime <name>"),
+    )
+
+    assert leaks == [], (
+        "User-facing runtime command hints should use the canonical <runtime> placeholder:\n"
+        f"{_format_failures(leaks)}"
+    )

@@ -58,7 +58,11 @@ from gpd.core.errors import ValidationError
 from gpd.core.extras import approximation_list
 from gpd.core.manuscript_artifacts import resolve_current_manuscript_entrypoint
 from gpd.core.phases import _milestone_completion_snapshot
-from gpd.core.project_reentry import resolve_project_reentry
+from gpd.core.project_reentry import (
+    ProjectReentryCandidate,
+    recoverable_project_context,
+    resolve_project_reentry,
+)
 from gpd.core.proof_review import (
     resolve_manuscript_proof_review_status,
     resolve_phase_proof_review_status,
@@ -75,7 +79,7 @@ from gpd.core.resume_surface import (
     resume_origin_for_handoff,
     resume_origin_for_interrupted_agent,
 )
-from gpd.core.root_resolution import resolve_project_root
+from gpd.core.root_resolution import resolve_project_root, resolve_project_roots
 from gpd.core.state import _current_machine_identity, _finalize_project_contract_gate
 from gpd.core.state import peek_state_json as _peek_state_json
 from gpd.core.utils import (
@@ -93,7 +97,6 @@ logger = logging.getLogger(__name__)
 
 # Research file extensions for project detection.
 _RESEARCH_EXTENSIONS = frozenset({".tex", ".ipynb", ".py", ".jl", ".f90"})
-_RUNTIME_CONFIG_DIRS = frozenset(descriptor.config_dir_name for descriptor in iter_runtime_descriptors())
 _LITERATURE_DIR_NAME = "literature"
 _REFERENCE_MAP_DOCS = ("REFERENCES.md", "VALIDATION.md")
 _LITERATURE_INCLUDE_LIMIT = 2
@@ -110,30 +113,45 @@ _REFERENCE_ROLE_PRIORITY = {
 _RESUME_SURFACE_SCHEMA_VERSION = 1
 
 # Directories to skip when scanning for research files.
-_RUNTIME_IGNORED_SCAN_PATHS = frozenset(
-    {
-        (descriptor.config_dir_name,)
-        for descriptor in iter_runtime_descriptors()
-    }
-)
 _LEADING_BLANK_LINES_BEFORE_FRONTMATTER_RE = re.compile(r"^(?:[ \t]*\r?\n)+(?=---[ \t]*\r?\n)")
-_IGNORE_DIRS = frozenset(
-    {
-        ".git",
-        PLANNING_DIR_NAME,
-        *_RUNTIME_CONFIG_DIRS,
-        ".venv",
-        ".tox",
-        ".pytest_cache",
-        ".mypy_cache",
-        ".ruff_cache",
-        ".vscode",
-        ".idea",
-        "node_modules",
-        "__pycache__",
-        GPD_INSTALL_DIR_NAME,
-    }
-)
+
+
+def _runtime_config_dirs() -> frozenset[str]:
+    """Return the live runtime config-dir inventory."""
+
+    return frozenset(descriptor.config_dir_name for descriptor in iter_runtime_descriptors())
+
+
+def _runtime_ignored_scan_paths() -> frozenset[tuple[str, ...]]:
+    """Return runtime-owned path suffixes to skip during research scans."""
+
+    return frozenset((descriptor.config_dir_name,) for descriptor in iter_runtime_descriptors())
+
+
+def _ignore_dirs() -> frozenset[str]:
+    """Return directory names excluded from research-file scans."""
+
+    return frozenset(
+        {
+            ".git",
+            PLANNING_DIR_NAME,
+            *_runtime_config_dirs(),
+            ".venv",
+            ".tox",
+            ".pytest_cache",
+            ".mypy_cache",
+            ".ruff_cache",
+            ".vscode",
+            ".idea",
+            "node_modules",
+            "__pycache__",
+            GPD_INSTALL_DIR_NAME,
+        }
+    )
+
+
+_RUNTIME_CONFIG_DIRS = _runtime_config_dirs()
+
 
 __all__ = [
     "init_execute_phase",
@@ -162,7 +180,11 @@ def _path_exists(cwd: Path, target: str) -> bool:
 
 def _state_exists(cwd: Path) -> bool:
     """Return whether the project has recoverable state from JSON or STATE.md."""
-    state, _state_issues, _state_source = _peek_state_json(cwd, recover_intent=False)
+    state, _state_issues, _state_source = _peek_state_json(
+        cwd,
+        recover_intent=False,
+        acquire_lock=False,
+    )
     return isinstance(state, dict)
 
 
@@ -214,8 +236,61 @@ def _build_structured_state_runtime_context(cwd: Path) -> dict[str, object]:
     }
 
 
-def _resolve_reentry_context(cwd: Path, *, data_root: Path | None = None) -> tuple[Path, dict[str, object]]:
+def _explicit_workspace_layout_context(cwd: Path) -> tuple[Path, dict[str, object]] | None:
+    """Return local current-workspace metadata when the caller already targets a GPD layout."""
+
+    resolution = resolve_project_roots(cwd)
+    if resolution is None or not resolution.has_project_layout:
+        return None
+
+    project_root = resolution.project_root
+    state_exists, roadmap_exists, project_exists = recoverable_project_context(project_root)
+    recoverable = state_exists or roadmap_exists or project_exists
+    if resolution.walk_up_steps > 0:
+        reason = "workspace resolved to ancestor project root"
+    elif not project_exists and recoverable:
+        reason = "workspace carries partial recoverable GPD state"
+    else:
+        reason = "workspace already points at a GPD project"
+
+    current_candidate = ProjectReentryCandidate(
+        source="current_workspace",
+        project_root=project_root.as_posix(),
+        available=project_root.is_dir(),
+        recoverable=recoverable,
+        resumable=False,
+        confidence=resolution.confidence.value,
+        reason=reason,
+        summary=reason,
+        state_exists=state_exists,
+        roadmap_exists=roadmap_exists,
+        project_exists=project_exists,
+    )
+    metadata: dict[str, object] = {
+        "workspace_root": resolution.workspace_root.as_posix() if resolution.workspace_root is not None else None,
+        "project_root": project_root.as_posix(),
+        "project_root_source": "current_workspace",
+        "project_root_auto_selected": False,
+        "project_reentry_mode": "current-workspace",
+        "project_reentry_requires_selection": False,
+        "project_reentry_selected_candidate": current_candidate.model_dump(mode="json"),
+        "project_reentry_candidates": [current_candidate.model_dump(mode="json")],
+    }
+    return project_root, metadata
+
+
+def _resolve_reentry_context(
+    cwd: Path,
+    *,
+    data_root: Path | None = None,
+    prefer_workspace_layout: bool = False,
+) -> tuple[Path, dict[str, object]]:
     """Return the effective project root plus shared re-entry metadata."""
+
+    if prefer_workspace_layout:
+        local_context = _explicit_workspace_layout_context(cwd)
+        if local_context is not None:
+            return local_context
 
     resolution = resolve_project_reentry(cwd, data_root=data_root)
     selected_project_root = resolution.resolved_project_root
@@ -464,14 +539,14 @@ def _append_unique_strings(target: list[str], values: list[object] | tuple[objec
 def _should_skip_research_scan_entry(cwd: Path, entry: Path) -> bool:
     """Return whether *entry* should be skipped during research-file discovery."""
 
-    if entry.name in _IGNORE_DIRS:
+    if entry.name in _ignore_dirs():
         return True
 
     try:
         relative_parts = entry.relative_to(cwd).parts
     except ValueError:
         return False
-    for ignored_parts in _RUNTIME_IGNORED_SCAN_PATHS:
+    for ignored_parts in _runtime_ignored_scan_paths():
         ignored_length = len(ignored_parts)
         if ignored_length == 0 or len(relative_parts) < ignored_length:
             continue
@@ -759,18 +834,7 @@ def _render_active_reference_context(
                 lines.append(f"- Source: {source_path}")
             for error in load_errors:
                 lines.append(f"- Blocker: {error}")
-            suppressed_nondurable_warnings = 0
-            for warning in load_warnings:
-                if "entry is not concrete enough to preserve as durable guidance:" in warning:
-                    suppressed_nondurable_warnings += 1
-                    continue
-                lines.append(f"- Warning: {warning}")
-            if suppressed_nondurable_warnings:
-                noun = "entry" if suppressed_nondurable_warnings == 1 else "entries"
-                verb = "was" if suppressed_nondurable_warnings == 1 else "were"
-                lines.append(
-                    f"- Warning: {suppressed_nondurable_warnings} non-durable contract intake {noun} {verb} dropped during normalization."
-                )
+            _append_contract_warnings(lines, load_warnings)
 
     if contract_validation is not None:
         lines.extend(["", "## Project Contract Validation"])
@@ -783,18 +847,7 @@ def _render_active_reference_context(
             )
         for error in list(contract_validation.get("errors") or []):
             lines.append(f"- Blocker: {error}")
-        suppressed_nondurable_validation_warnings = 0
-        for warning in list(contract_validation.get("warnings") or []):
-            if "entry is not concrete enough to preserve as durable guidance:" in warning:
-                suppressed_nondurable_validation_warnings += 1
-                continue
-            lines.append(f"- Warning: {warning}")
-        if suppressed_nondurable_validation_warnings:
-            noun = "entry" if suppressed_nondurable_validation_warnings == 1 else "entries"
-            verb = "was" if suppressed_nondurable_validation_warnings == 1 else "were"
-            lines.append(
-                f"- Warning: {suppressed_nondurable_validation_warnings} non-durable contract intake {noun} {verb} dropped during normalization."
-            )
+        _append_contract_warnings(lines, list(contract_validation.get("warnings") or []))
 
     lines.extend(
         [
@@ -844,6 +897,30 @@ def _render_active_reference_context(
         lines.append("- No literature-review or research-map anchor artifacts found yet.")
 
     return "\n".join(lines)
+
+
+_NON_DURABLE_CONTRACT_WARNING_FRAGMENTS = (
+    "entry does not resolve to a project-local artifact:",
+    "entry is not an explicit project artifact path:",
+    "entry is not concrete enough to preserve as durable guidance:",
+    "entry is only a placeholder and does not preserve actionable guidance:",
+)
+
+
+def _append_contract_warnings(lines: list[str], warnings: list[str]) -> None:
+    suppressed_nondurable_warnings = 0
+    for warning in warnings:
+        if any(fragment in warning for fragment in _NON_DURABLE_CONTRACT_WARNING_FRAGMENTS):
+            suppressed_nondurable_warnings += 1
+            continue
+        lines.append(f"- Warning: {warning}")
+    if not suppressed_nondurable_warnings:
+        return
+    noun = "warning" if suppressed_nondurable_warnings == 1 else "warnings"
+    verb = "was" if suppressed_nondurable_warnings == 1 else "were"
+    lines.append(
+        f"- Warning: {suppressed_nondurable_warnings} non-durable contract-intake {noun} {verb} collapsed during normalization."
+    )
 
 
 def _reference_artifact_payload(cwd: Path) -> dict[str, object]:
@@ -928,13 +1005,19 @@ def _build_reference_runtime_context(
         project_contract_load_info,
     )
     project_text = _safe_read_file(cwd / PLANNING_DIR_NAME / PROJECT_FILENAME)
+    visible_context_contract = visible_contract if project_contract_gate.get("visible") else None
     authoritative_contract = visible_contract if project_contract_gate.get("authoritative") else None
+    carry_forward_reference_contract = (
+        visible_context_contract
+        if authoritative_contract is not None or project_contract_gate.get("approval_blocked")
+        else None
+    )
     surfaced_active_references = _merge_active_references(
-        _serialize_active_references(authoritative_contract),
+        _serialize_active_references(carry_forward_reference_contract),
         derived_references,
     )
     surfaced_effective_reference_intake = _merge_reference_intake(
-        authoritative_contract,
+        carry_forward_reference_contract,
         artifact_ingestion.intake.to_dict(),
         surfaced_active_references,
     )
@@ -952,13 +1035,13 @@ def _build_reference_runtime_context(
             )
 
     return {
-        "project_contract": authoritative_contract.model_dump(mode="json") if authoritative_contract is not None else None,
+        "project_contract": visible_context_contract.model_dump(mode="json") if visible_context_contract is not None else None,
         "project_contract_validation": project_contract_validation,
         "project_contract_load_info": project_contract_load_info,
         "project_contract_gate": project_contract_gate,
         "contract_intake": (
-            authoritative_contract.context_intake.model_dump(mode="json")
-            if authoritative_contract is not None
+            visible_context_contract.context_intake.model_dump(mode="json")
+            if visible_context_contract is not None
             else None
         ),
         "effective_reference_intake": surfaced_effective_reference_intake,
@@ -1683,16 +1766,33 @@ def _resolve_model(
     runtime: str | None = None,
 ) -> str | None:
     """Resolve the runtime-specific model override for an agent type."""
+    def _normalize_runtime_local(value: object) -> str | None:
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
+        return None
+
     active_runtime = runtime
     runtime_unknown = "unknown"
+    normalize_runtime = _normalize_runtime_local
     if active_runtime is None:
         try:
-            from gpd.hooks.runtime_detect import RUNTIME_UNKNOWN
+            from gpd.hooks.runtime_detect import RUNTIME_UNKNOWN, normalize_runtime_name
 
             runtime_unknown = RUNTIME_UNKNOWN
+            normalize_runtime = normalize_runtime_name
         except Exception:
             pass
         active_runtime = _detect_platform(cwd)
+    else:
+        try:
+            from gpd.hooks.runtime_detect import RUNTIME_UNKNOWN, normalize_runtime_name
+
+            runtime_unknown = RUNTIME_UNKNOWN
+            normalize_runtime = normalize_runtime_name
+        except Exception:
+            pass
+    active_runtime = normalize_runtime(active_runtime)
     if active_runtime == runtime_unknown:
         active_runtime = None
 
@@ -1729,9 +1829,17 @@ def _detect_platform(cwd: Path | None = None) -> str:
     resolved_home = Path.home()
     runtime_unknown = "unknown"
     try:
-        from gpd.hooks.runtime_detect import RUNTIME_UNKNOWN, detect_runtime_for_gpd_use
+        from gpd.hooks.runtime_detect import (
+            RUNTIME_UNKNOWN,
+            SOURCE_ENV,
+            detect_runtime_for_gpd_use,
+            resolve_effective_runtime,
+        )
 
         runtime_unknown = RUNTIME_UNKNOWN
+        active = resolve_effective_runtime(cwd=resolved_cwd, home=resolved_home)
+        if active.source == SOURCE_ENV and isinstance(active.runtime, str) and active.runtime != runtime_unknown:
+            return active.runtime
         detected = detect_runtime_for_gpd_use(cwd=resolved_cwd, home=resolved_home)
         if isinstance(detected, str) and detected.strip():
             return detected
@@ -2056,7 +2164,15 @@ def init_quick(cwd: Path, description: str | None = None) -> dict:
 def init_resume(cwd: Path, *, data_root: Path | None = None) -> dict:
     """Assemble context for resuming work."""
     requested_cwd = cwd.expanduser().resolve(strict=False)
-    effective_cwd, reentry_metadata = _resolve_reentry_context(requested_cwd, data_root=data_root)
+    workspace_planning_exists = _path_exists(requested_cwd, PLANNING_DIR_NAME)
+    workspace_roadmap_exists = _path_exists(requested_cwd, f"{PLANNING_DIR_NAME}/{ROADMAP_FILENAME}")
+    workspace_project_exists = _path_exists(requested_cwd, f"{PLANNING_DIR_NAME}/{PROJECT_FILENAME}")
+    workspace_state_exists = _state_exists(requested_cwd)
+    effective_cwd, reentry_metadata = _resolve_reentry_context(
+        requested_cwd,
+        data_root=data_root,
+        prefer_workspace_layout=True,
+    )
     config = load_config(effective_cwd)
     execution_context = _build_execution_runtime_context(effective_cwd)
     result_lookup_by_id = _build_resume_result_lookup(effective_cwd)
@@ -2123,7 +2239,12 @@ def init_resume(cwd: Path, *, data_root: Path | None = None) -> dict:
         "project_reentry_requires_selection": reentry_metadata["project_reentry_requires_selection"],
         "project_reentry_selected_candidate": reentry_metadata.get("project_reentry_selected_candidate"),
         "project_reentry_candidates": reentry_metadata["project_reentry_candidates"],
-        # File existence
+        # Requested workspace availability.
+        "workspace_state_exists": workspace_state_exists,
+        "workspace_roadmap_exists": workspace_roadmap_exists,
+        "workspace_project_exists": workspace_project_exists,
+        "workspace_planning_exists": workspace_planning_exists,
+        # Selected project availability.
         "state_exists": _state_exists(effective_cwd),
         "roadmap_exists": _path_exists(effective_cwd, f"{PLANNING_DIR_NAME}/{ROADMAP_FILENAME}"),
         "project_exists": _path_exists(effective_cwd, f"{PLANNING_DIR_NAME}/{PROJECT_FILENAME}"),
@@ -2435,7 +2556,11 @@ def init_progress(
     includes = includes or set()
     requested_cwd = cwd.expanduser().resolve(strict=False)
     if include_project_reentry:
-        effective_cwd, reentry_metadata = _resolve_reentry_context(requested_cwd, data_root=data_root)
+        effective_cwd, reentry_metadata = _resolve_reentry_context(
+            requested_cwd,
+            data_root=data_root,
+            prefer_workspace_layout=True,
+        )
     else:
         effective_cwd = resolve_project_root(requested_cwd, require_layout=True) or requested_cwd
         reentry_metadata = {

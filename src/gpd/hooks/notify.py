@@ -108,7 +108,7 @@ def _runtime_supports_usage_telemetry(runtime: str | None) -> bool:
 
     try:
         capability = get_runtime_capabilities(runtime)
-    except Exception:
+    except KeyError:
         return False
     return capability.telemetry_source == "notify-hook" and capability.telemetry_completeness != "none"
 
@@ -301,7 +301,8 @@ def _emit_execution_notification(cwd: str) -> None:
         return
 
     claim_fingerprint = _execution_claim_fingerprint(cwd, fingerprint)
-    if not _claim_last_notification(cwd, channel="execution", fingerprint=claim_fingerprint):
+    claimed = _claim_last_notification(cwd, channel="execution", fingerprint=claim_fingerprint)
+    if claimed is False:
         return
 
     sys.stderr.write(message)
